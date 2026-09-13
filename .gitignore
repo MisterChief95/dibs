@@ -1,5 +1,21 @@
+# =======================================================================
+# Standard Environment & Dependency Files
+# =======================================================================
+
+# Local environment variables (API keys, secrets)
+.env
+.env.local
+.env.*.local
+
+*venv/
 __pycache__/
 *.pyc
 .dibs/
 .DS_Store
 Thumbs.db
+
+# IDE / Editor configuration overrides
+.vscode/
+.idea/
+*.suo
+*.ntvs*
