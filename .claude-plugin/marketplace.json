@@ -1,0 +1,14 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "dibs",
+  "description": "Multi-agent workspace coordination: dependency-aware tasks, expiring leases, and file reservations.",
+  "owner": { "name": "Brendan Lackey", "url": "https://github.com/MisterChief95" },
+  "plugins": [
+    {
+      "name": "dibs",
+      "description": "Coordinate multiple local agents sharing one workspace so they don't overlap edits.",
+      "source": "./",
+      "category": "productivity"
+    }
+  ]
+}
