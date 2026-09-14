@@ -63,6 +63,31 @@ In every case, the actual logic is the one script, [`.github/skills/dibs/scripts
 
 Full command reference, conflict handling, and exit codes are documented in [SKILL.md](.github/skills/dibs/SKILL.md).
 
+## Task metadata and filtering
+
+Tasks record `created` and `updated` timestamps and may include a lowercase `type` and `tags`:
+
+```json
+{
+  "type": "feature",
+  "tags": ["database", "backend"]
+}
+```
+
+Tags are ephemeral board metadata. Anyone can add or remove them without claiming the task or changing its revision; the change still refreshes `updated` and records an audit event:
+
+```bash
+python .github/skills/dibs/scripts/dibs.py tag TASK-001 --workspace . --add database
+```
+
+`list`, `next`, `claim-next`, and `export` can filter by `--type`, repeatable `--tag`, and inclusive ISO-8601 timestamp ranges:
+
+```bash
+python .github/skills/dibs/scripts/dibs.py list --workspace . --type feature --tag database --updated-after 2026-09-01T00:00:00Z
+```
+
+Existing databases retain their timestamps and upgrade in place when `init` migrates them to schema version 3.
+
 ## For humans: checking status
 
 You don't need to read raw JSON or learn the CLI to see what's going on. Four read-only commands are available (see Installation above for how each assistant exposes them):
@@ -79,3 +104,5 @@ These only read the database — they can't claim, block, or complete work, so t
 ## Requirements
 
 Python 3, standard library only — no third-party packages, no server process. Works from any local disk path; network paths are rejected.
+
+Maintained by [Brendan Lackey](https://github.com/MisterChief95). Project source and documentation are hosted at [MisterChief95/dibs](https://github.com/MisterChief95/dibs).
