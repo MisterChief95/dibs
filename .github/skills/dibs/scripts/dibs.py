@@ -13,7 +13,7 @@ from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path, PureWindowsPath
 
-VERSION = 2
+VERSION = 3
 EXIT = {"internal": 1, "conflict": 2, "invalid_input": 3, "storage": 4, "not_found": 5}
 SKILL_DIR = Path(__file__).resolve().parents[1]
 # os.path.isreserved is 3.13+; PureWindowsPath.is_reserved covers older runtimes.
@@ -21,7 +21,7 @@ is_reserved = getattr(
     os.path, "isreserved", lambda part: PureWindowsPath(part).is_reserved()
 )
 STATUSES = ("todo", "in_progress", "blocked", "review", "done", "cancelled")
-SPEC_KEYS = {
+REQUIRED_SPEC_KEYS = {
     "id",
     "title",
     "priority",
@@ -30,6 +30,7 @@ SPEC_KEYS = {
     "description",
     "acceptance",
 }
+OPTIONAL_SPEC_KEYS = {"type", "tags"}
 MIGRATIONS = [
     [
         "CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
@@ -54,6 +55,15 @@ MIGRATIONS = [
         "CREATE INDEX tasks_ready ON tasks(status, priority, id)",
         "CREATE INDEX events_task ON events(task_id, sequence)",
         "CREATE INDEX reservations_task ON reservations(task_id)",
+    ],
+    [
+        "ALTER TABLE tasks ADD COLUMN task_type TEXT NOT NULL DEFAULT 'task'",
+        """CREATE TABLE task_tags (task_id TEXT NOT NULL REFERENCES tasks(id),
+            tag TEXT NOT NULL, PRIMARY KEY(task_id,tag))""",
+        "CREATE INDEX tasks_created ON tasks(created)",
+        "CREATE INDEX tasks_updated ON tasks(updated)",
+        "CREATE INDEX tasks_type ON tasks(task_type)",
+        "CREATE INDEX task_tags_tag ON task_tags(tag,task_id)",
     ],
 ]
 
@@ -109,11 +119,30 @@ def nonempty(value, name):
         fail("invalid_input", f"{name} must be nonempty text")
 
 
+def label(value, name):
+    nonempty(value, name)
+    if not re.fullmatch(r"[a-z0-9][a-z0-9_.-]*", value):
+        fail("invalid_input", f"{name} must use lowercase letters, numbers, dot, underscore, or hyphen")
+    return value
+
+
+def parse_timestamp(value):
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.timestamp()
+    except (ValueError, OverflowError):
+        raise argparse.ArgumentTypeError("use an ISO-8601 timestamp, e.g. 2026-09-14T12:00:00Z")
+
+
 def validate_spec(spec):
-    if not isinstance(spec, dict) or set(spec) != SPEC_KEYS:
+    keys = set(spec) if isinstance(spec, dict) else set()
+    if not isinstance(spec, dict) or not REQUIRED_SPEC_KEYS <= keys or keys - REQUIRED_SPEC_KEYS - OPTIONAL_SPEC_KEYS:
         fail(
             "invalid_input",
-            "Task fields must be exactly: " + ", ".join(sorted(SPEC_KEYS)),
+            "Task requires fields: " + ", ".join(sorted(REQUIRED_SPEC_KEYS))
+            + "; optional: " + ", ".join(sorted(OPTIONAL_SPEC_KEYS)),
         )
     for field in ("id", "title", "description"):
         nonempty(spec[field], field)
@@ -131,6 +160,14 @@ def validate_spec(spec):
             fail("invalid_input", f"Duplicate {field} entries")
     if not spec["acceptance"]:
         fail("invalid_input", "Acceptance evidence requirements cannot be empty")
+    label(spec.get("type", "task"), "type")
+    tags = spec.get("tags", [])
+    if not isinstance(tags, list):
+        fail("invalid_input", "tags must be an array")
+    for tag in tags:
+        label(tag, "tag")
+    if len(set(tags)) != len(tags):
+        fail("invalid_input", "Duplicate tags")
 
 
 def validate_graph(specs):
@@ -283,6 +320,13 @@ class Store:
     def detail(self, task):
         row = dict(self.row(task))
         row["spec"] = json.loads(row["spec"])
+        row["spec"].setdefault("type", row.pop("task_type"))
+        row["spec"]["tags"] = [
+            r[0]
+            for r in self.db.execute(
+                "SELECT tag FROM task_tags WHERE task_id=? ORDER BY tag", (task,)
+            )
+        ]
         row["abandoned"] = bool(row["token"] and row["expires"] <= time.time())
         if row["abandoned"]:
             if row["status"] != "blocked":
@@ -330,6 +374,36 @@ class Store:
             for row in self.db.execute("SELECT id,spec FROM tasks")
         }
 
+    def replace_tags(self, task, tags):
+        self.db.execute("DELETE FROM task_tags WHERE task_id=?", (task,))
+        self.db.executemany(
+            "INSERT INTO task_tags(task_id,tag) VALUES (?,?)",
+            [(task, tag) for tag in tags],
+        )
+
+    def task_rows(self, status=None):
+        args = self.args
+        clauses, values = [], []
+        filters = (
+            ("status", status or getattr(args, "status", None), "="),
+            ("task_type", getattr(args, "task_type", None), "="),
+            ("created", getattr(args, "created_after", None), ">="),
+            ("created", getattr(args, "created_before", None), "<="),
+            ("updated", getattr(args, "updated_after", None), ">="),
+            ("updated", getattr(args, "updated_before", None), "<="),
+        )
+        for column, value, operator in filters:
+            if value is not None:
+                clauses.append(f"{column}{operator}?")
+                values.append(value)
+        for tag in getattr(args, "tag", []):
+            clauses.append(
+                "EXISTS (SELECT 1 FROM task_tags WHERE task_id=tasks.id AND tag=?)"
+            )
+            values.append(tag)
+        where = " WHERE " + " AND ".join(clauses) if clauses else ""
+        return self.db.execute("SELECT * FROM tasks" + where, values).fetchall()
+
     def import_tasks(self):
         payload = read_json(self.args.file)
         if not isinstance(payload, dict) or not isinstance(payload.get("tasks"), list):
@@ -352,9 +426,11 @@ class Store:
             spec = specs[task]
             now = time.time()
             self.db.execute(
-                "INSERT INTO tasks(id,spec,priority,created,updated) VALUES (?,?,?,?,?)",
-                (task, encoded(spec), spec["priority"], now, now),
+                """INSERT INTO tasks(id,spec,priority,created,updated,task_type)
+                VALUES (?,?,?,?,?,?)""",
+                (task, encoded(spec), spec["priority"], now, now, spec.get("type", "task")),
             )
+            self.replace_tags(task, spec.get("tags", []))
         for task in added:
             for dep in specs[task]["depends_on"]:
                 self.db.execute("INSERT INTO dependencies VALUES (?,?)", (task, dep))
@@ -439,7 +515,7 @@ class Store:
         args = self.args
         candidates = (
             sorted(
-                self.db.execute("SELECT * FROM tasks WHERE status='todo'"),
+                self.task_rows("todo"),
                 key=task_order,
             )
             if (args.command == "claim-next")
@@ -675,15 +751,42 @@ class Store:
                 "Cannot add unfinished prerequisites to active/completed work",
             )
         self.db.execute(
-            "UPDATE tasks SET spec=?,priority=?,revision=revision+1,updated=? WHERE id=?",
-            (encoded(spec), spec["priority"], time.time(), args.task),
+            """UPDATE tasks SET spec=?,priority=?,task_type=?,revision=revision+1,updated=?
+            WHERE id=?""",
+            (encoded(spec), spec["priority"], spec.get("type", "task"), time.time(), args.task),
         )
+        self.replace_tags(args.task, spec.get("tags", []))
         self.db.execute("DELETE FROM dependencies WHERE task_id=?", (args.task,))
         for dep in spec["depends_on"]:
             self.db.execute("INSERT INTO dependencies VALUES (?,?)", (args.task, dep))
         self.event(
             "amend", args.task, {"before": json.loads(row["spec"]), "after": spec}
         )
+        return {"task": self.detail(args.task)}
+
+    def tag(self):
+        args = self.args
+        self.row(args.task)
+        if not args.add_tag and not args.remove_tag:
+            fail("invalid_input", "Specify --add or --remove")
+        overlap = set(args.add_tag) & set(args.remove_tag)
+        if overlap:
+            fail("invalid_input", "Cannot add and remove the same tag")
+        before = [
+            row[0]
+            for row in self.db.execute(
+                "SELECT tag FROM task_tags WHERE task_id=? ORDER BY tag", (args.task,)
+            )
+        ]
+        tags = sorted((set(before) | set(args.add_tag)) - set(args.remove_tag))
+        if tags == sorted(before):
+            fail("conflict", "Tags would not change")
+        self.db.execute(
+            "UPDATE tasks SET updated=? WHERE id=?",
+            (time.time(), args.task),
+        )
+        self.replace_tags(args.task, tags)
+        self.event("tag", args.task, {"before": before, "after": tags})
         return {"task": self.detail(args.task)}
 
     def read(self):
@@ -700,16 +803,12 @@ class Store:
             )
             return {"events": [dict(r) | {"data": json.loads(r["data"])} for r in rows]}
         tasks = []
-        for row in sorted(
-            self.db.execute("SELECT * FROM tasks").fetchall(), key=task_order
-        ):
+        for row in sorted(self.task_rows(), key=task_order):
             detail = self.detail(row["id"])
             detail["ready"] = (
                 row["status"] == "todo" and not row["token"] and self.ready(row)
             )
             if args.command == "next" and not detail["ready"]:
-                continue
-            if args.status and detail["status"] != args.status:
                 continue
             tasks.append(detail)
         if args.command == "export":
@@ -777,6 +876,8 @@ class Store:
             result = self.claim()
         elif args.command == "amend":
             result = self.amend()
+        elif args.command == "tag":
+            result = self.tag()
         else:
             result = self.mutate()
         self.db.commit()
@@ -864,6 +965,7 @@ Exit codes: 0 success | 1 internal | 2 conflict | 3 invalid input | 4 storage | 
         "complete": "Record completion evidence and release ownership",
         "cancel": "Cancel owned or unclaimed work and release its reservations",
         "amend": "Update a task specification using its current revision",
+        "tag": "Add or remove task tags without changing task ownership",
         "reclaim": "Take over an expired lease after the old worker stops",
         "export": "Export a readable status and audit snapshot",
         "backup": "Create a consistent SQLite database backup",
@@ -927,6 +1029,32 @@ Exit codes: 0 success | 1 internal | 2 conflict | 3 invalid input | 4 storage | 
                 choices=STATUSES,
                 help="Filter: " + ", ".join(STATUSES),
             )
+        if name in ("list", "next", "claim-next", "export"):
+            options.add_argument(
+                "--type",
+                dest="task_type",
+                type=lambda value: label(value, "type"),
+                help="Only this task type",
+            )
+            options.add_argument(
+                "--tag",
+                action="append",
+                default=[],
+                type=lambda value: label(value, "tag"),
+                help="Require a tag (repeat to require all)",
+            )
+            for flag, help_text in (
+                ("created-after", "Created at or after this ISO-8601 timestamp"),
+                ("created-before", "Created at or before this ISO-8601 timestamp"),
+                ("updated-after", "Updated at or after this ISO-8601 timestamp"),
+                ("updated-before", "Updated at or before this ISO-8601 timestamp"),
+            ):
+                options.add_argument(
+                    "--" + flag,
+                    type=parse_timestamp,
+                    metavar="TIME",
+                    help=help_text,
+                )
         if name in ("claim", "claim-next", "resume", "reserve", "release"):
             paths = s.add_argument_group(
                 "reservations (repeatable; literal paths, not globs)"
@@ -1026,6 +1154,25 @@ Exit codes: 0 success | 1 internal | 2 conflict | 3 invalid input | 4 storage | 
                 action="store_true",
                 help="Acknowledge acting on unclaimed work (requires --revision)",
             )
+        if name == "tag":
+            options.add_argument(
+                "--add",
+                dest="add_tag",
+                action="append",
+                default=[],
+                type=lambda value: label(value, "tag"),
+                metavar="TAG",
+                help="Add a tag (repeatable)",
+            )
+            options.add_argument(
+                "--remove",
+                dest="remove_tag",
+                action="append",
+                default=[],
+                type=lambda value: label(value, "tag"),
+                metavar="TAG",
+                help="Remove a tag (repeatable)",
+            )
         if name == "note":
             options.add_argument(
                 "--message",
@@ -1081,11 +1228,12 @@ def human_output(result, command):
                 t["status"],
                 "yes" if t.get("ready") else "-",
                 one_line(t["owner"] or "-"),
+                timestamp(t["updated"])[:10],
                 one_line(t["spec"]["title"]),
             ]
             for t in tasks
         ]
-        headers = ["TASK", "PRI", "STATUS", "READY", "OWNER", "TITLE"]
+        headers = ["TASK", "PRI", "STATUS", "READY", "OWNER", "UPDATED", "TITLE"]
         widths = [
             max(len(row[i]) for row in [headers, *rows])
             for i in range(len(headers) - 1)
@@ -1112,6 +1260,8 @@ def human_output(result, command):
         lines = [
             f"{task['id']}  {spec['title']}",
             f"Status: {task['status']} | Priority: {task['priority']} | Revision: {task['revision']}",
+            f"Type: {spec['type']} | Tags: {', '.join(spec['tags']) or 'none'}",
+            f"Created: {timestamp(task['created'])} | Updated: {timestamp(task['updated'])}",
             f"Owner: {task['owner'] or '-'}",
         ]
         if task["expires"] is not None:
@@ -1199,6 +1349,11 @@ def main():
                 "invalid_input",
                 "events requires nonnegative --after and --limit 1..10000",
             )
+        for prefix in ("created", "updated"):
+            after = getattr(args, prefix + "_after", None)
+            before = getattr(args, prefix + "_before", None)
+            if after is not None and before is not None and after > before:
+                fail("invalid_input", f"{prefix}-after must not exceed {prefix}-before")
         store = Store(args)
         result = {"ok": True, "error": None, **store.run()}
         code = 0

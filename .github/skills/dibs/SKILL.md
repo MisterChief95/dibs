@@ -22,7 +22,7 @@ The default database is `WORKSPACE/.dibs/tasks.sqlite3`. Keep it on a local disk
 - Task `work_areas` do not create reservations by themselves. Supply `--reserve-file`, `--reserve-tree`, or `--resource` when claiming, or pass `--reserve-work-areas` to `claim`, `claim-next`, or `resume` to reserve the claimed task's work areas (existing directories become trees, everything else files; globs are rejected). Add reservations before touching more shared state.
 - Use the narrowest literal reservation that covers the work. Reservations do not accept globs. A tree conflicts with every reservation at or below that path; a file conflicts only at that path. Named resources cover non-file exclusivity such as `git-index`.
 - Keep the `lease_token` private to the owning worker and use the exact same actor on every owned mutation.
-- Every mutation advances `task.revision`. `resume`, `reclaim`, and unowned `amend` require the current revision. Lease-holding commands accept `--revision` as an optional extra guard; the token already proves ownership.
+- Every durable coordination mutation advances `task.revision`; ephemeral tag changes do not. The revision is an optimistic-concurrency guard that prevents a stale worker from overwriting newer task state. `resume`, `reclaim`, and unowned `amend` require the current revision. Lease-holding commands accept `--revision` as an optional extra guard; the token already proves ownership.
 - Renew with `heartbeat` before the lease expires. Choose `--lease-seconds` long enough to reach the next renewal, not as a substitute for heartbeats.
 - Stop editing before any ownership-releasing command and pass `--ack-quiescent`. Never reclaim an expired lease until the old worker has been stopped or inspected and is known to be quiescent.
 - An expired lease becomes abandoned and blocked, but its reservations remain protective. The original owner may recover it with `heartbeat` using the same token and actor, as long as nobody has reclaimed it. Anyone else uses `reclaim`, rather than bypassing or duplicating those reservations.
@@ -51,13 +51,17 @@ Import a UTF-8 JSON plan with this shape:
       "depends_on": [],
       "work_areas": ["src/helper.py"],
       "description": "Define the behavior and intended scope.",
-      "acceptance": ["Targeted test passes"]
+      "acceptance": ["Targeted test passes"],
+      "type": "feature",
+      "tags": ["backend", "coordination"]
     }
   ]
 }
 ```
 
-Each task must contain exactly those seven fields. IDs match `[A-Z][A-Z0-9]*-<digits>`, priorities are `P0` through `P3`, dependencies must exist, dependency cycles are rejected, list values must be unique nonempty strings, and `acceptance` must not be empty. Import is additive and idempotent for identical existing specs; changing an existing task requires `amend` with optimistic-concurrency arguments.
+The original seven fields remain required. `type` and `tags` are optional; type defaults to `task`, and tags default to an empty list. Types and tags use lowercase letters, numbers, dots, underscores, and hyphens. IDs match `[A-Z][A-Z0-9]*-<digits>`, priorities are `P0` through `P3`, dependencies must exist, dependency cycles are rejected, list values must be unique nonempty strings, and `acceptance` must not be empty. Import is additive and idempotent for identical existing specs; changing an existing task requires `amend` with optimistic-concurrency arguments.
+
+Tasks record `created` and `updated` timestamps in the database. `list`, `next`, `claim-next`, and `export` accept `--type`, repeatable `--tag` (all supplied tags must match), and inclusive `--created-after`, `--created-before`, `--updated-after`, and `--updated-before` ISO-8601 filters. `list`, `next`, and `export` also accept `--status`.
 
 ## Worker lifecycle
 
@@ -90,13 +94,15 @@ To defer or drop work nobody has claimed, run `block` (from `todo` or `review`) 
 
 Resume `blocked` or `review` work with its current revision; this creates a fresh token. For an abandoned lease, first inspect the task, confirm the previous worker is quiescent, then use `reclaim --revision N --ack-quiescent`; reclaim preserves the abandoned task's reservations and returns a new token.
 
+Use `tag TASK --add TAG` or `--remove TAG` to change ephemeral board metadata without claiming the task or changing its revision. The change refreshes `updated` and records an audit event. Both flags are repeatable.
+
 ## Command routing
 
 - Inspect: `list`, `show`, `next`, `events`.
 - Acquire: `claim`, `claim-next`, `resume`, `reclaim`.
 - Maintain an owned task: `heartbeat`, `reserve`, `release`, `note`, `handoff`.
 - Release ownership: `block`, `review`, `complete`, `cancel`.
-- Administer: `init`, `import`, `amend`, `export`, `backup`.
+- Administer: `init`, `import`, `amend`, `tag`, `export`, `backup`.
 
 Use `COMMAND --help` for exact flags. `export --file` and `backup --file` create new files exclusively and will not overwrite an existing destination. `amend` requires the current revision plus the lease token for owned work, or `--ack-unowned` for unowned work.
 
