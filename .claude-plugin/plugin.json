@@ -5,6 +5,7 @@
   "author": { "name": "Brendan Lackey", "url": "https://github.com/MisterChief95" },
   "homepage": "https://github.com/MisterChief95/dibs",
   "repository": "https://github.com/MisterChief95/dibs",
+  "license": "MIT",
   "keywords": ["multi-agent", "coordination", "tasks", "file-locking"],
   "skills": "./.github/skills",
   "commands": "./.claude/commands"

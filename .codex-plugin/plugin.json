@@ -3,5 +3,23 @@
   "version": "1.2.0",
   "description": "Coordinate multiple local coding agents sharing one workspace: dependency-aware tasks, expiring ownership leases, file/resource reservations, and an auditable SQLite state store.",
   "author": { "name": "Brendan Lackey", "url": "https://github.com/MisterChief95" },
-  "skills": "./.github/skills"
+  "homepage": "https://github.com/MisterChief95/dibs",
+  "repository": "https://github.com/MisterChief95/dibs",
+  "license": "MIT",
+  "keywords": ["multi-agent", "coordination", "tasks", "file-locking"],
+  "skills": "./.github/skills",
+  "interface": {
+    "displayName": "Dibs",
+    "shortDescription": "Coordinate coding agents in a shared workspace.",
+    "longDescription": "Plan, claim, implement, test, and audit agent work against a local codebase.",
+    "developerName": "Brendan Lackey",
+    "category": "Productivity",
+    "capabilities": ["Task coordination", "Audit logging", "SQLite storage"],
+    "websiteURL": "https://github.com/MisterChief95/dibs",
+    "defaultPrompt": [
+      "Coordinate this work with Dibs.",
+      "Show the Dibs tasks ready to claim.",
+      "Review the Dibs task audit log."
+    ]
+  }
 }

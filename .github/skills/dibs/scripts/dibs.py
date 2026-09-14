@@ -321,12 +321,12 @@ class Store:
         row = dict(self.row(task))
         row["spec"] = json.loads(row["spec"])
         row["spec"].setdefault("type", row.pop("task_type"))
-        row["spec"].setdefault(
-            "tags",
-            [r[0] for r in self.db.execute(
+        row["spec"]["tags"] = [
+            r[0]
+            for r in self.db.execute(
                 "SELECT tag FROM task_tags WHERE task_id=? ORDER BY tag", (task,)
-            )],
-        )
+            )
+        ]
         row["abandoned"] = bool(row["token"] and row["expires"] <= time.time())
         if row["abandoned"]:
             if row["status"] != "blocked":
@@ -766,28 +766,24 @@ class Store:
 
     def tag(self):
         args = self.args
-        row = self.row(args.task)
-        if row["token"]:
-            self.require_lease(row)
-        elif args.revision != row["revision"] or not args.ack_unowned:
-            fail(
-                "conflict",
-                "Tagging unowned work requires current --revision and --ack-unowned",
-            )
+        self.row(args.task)
         if not args.add_tag and not args.remove_tag:
             fail("invalid_input", "Specify --add or --remove")
         overlap = set(args.add_tag) & set(args.remove_tag)
         if overlap:
             fail("invalid_input", "Cannot add and remove the same tag")
-        spec = json.loads(row["spec"])
-        before = spec.get("tags", [])
+        before = [
+            row[0]
+            for row in self.db.execute(
+                "SELECT tag FROM task_tags WHERE task_id=? ORDER BY tag", (args.task,)
+            )
+        ]
         tags = sorted((set(before) | set(args.add_tag)) - set(args.remove_tag))
         if tags == sorted(before):
             fail("conflict", "Tags would not change")
-        spec["tags"] = tags
         self.db.execute(
-            "UPDATE tasks SET spec=?,revision=revision+1,updated=? WHERE id=?",
-            (encoded(spec), time.time(), args.task),
+            "UPDATE tasks SET updated=? WHERE id=?",
+            (time.time(), args.task),
         )
         self.replace_tags(args.task, tags)
         self.event("tag", args.task, {"before": before, "after": tags})
@@ -969,7 +965,7 @@ Exit codes: 0 success | 1 internal | 2 conflict | 3 invalid input | 4 storage | 
         "complete": "Record completion evidence and release ownership",
         "cancel": "Cancel owned or unclaimed work and release its reservations",
         "amend": "Update a task specification using its current revision",
-        "tag": "Add or remove task tags using its current revision",
+        "tag": "Add or remove task tags without changing task ownership",
         "reclaim": "Take over an expired lease after the old worker stops",
         "export": "Export a readable status and audit snapshot",
         "backup": "Create a consistent SQLite database backup",
@@ -1110,7 +1106,6 @@ Exit codes: 0 success | 1 internal | 2 conflict | 3 invalid input | 4 storage | 
             "complete",
             "cancel",
             "amend",
-            "tag",
             "resume",
             "reclaim",
         ):
@@ -1124,7 +1119,7 @@ Exit codes: 0 success | 1 internal | 2 conflict | 3 invalid input | 4 storage | 
                 + (
                     " (required)"
                     if required
-                    else " (optional guard with a lease; required for unclaimed amend/tag/block/cancel)"
+                    else " (optional guard with a lease; required for unclaimed amend/block/cancel)"
                 ),
             )
         if name in (
@@ -1137,9 +1132,8 @@ Exit codes: 0 success | 1 internal | 2 conflict | 3 invalid input | 4 storage | 
             "complete",
             "cancel",
             "amend",
-            "tag",
         ):
-            unclaimed_ok = name in ("amend", "tag", "block", "cancel")
+            unclaimed_ok = name in ("amend", "block", "cancel")
             ownership.add_argument(
                 "--token",
                 metavar="TOKEN",
@@ -1154,7 +1148,7 @@ Exit codes: 0 success | 1 internal | 2 conflict | 3 invalid input | 4 storage | 
                 action="store_true",
                 help="Acknowledge editing stopped before release/takeover",
             )
-        if name in ("amend", "tag", "block", "cancel"):
+        if name in ("amend", "block", "cancel"):
             ownership.add_argument(
                 "--ack-unowned",
                 action="store_true",

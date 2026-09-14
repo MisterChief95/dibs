@@ -62,7 +62,7 @@ class TaskMetadataTest(unittest.TestCase):
         self.run_dibs("import", "--file", str(plan))
         task = self.run_dibs("show", "TASK-001")["task"]
         self.assertEqual(task["spec"]["type"], "feature")
-        self.assertEqual(task["spec"]["tags"], ["database", "audit"])
+        self.assertEqual(task["spec"]["tags"], ["audit", "database"])
         self.assertLessEqual(task["created"], task["updated"])
         legacy = self.run_dibs("show", "TASK-002")["task"]
         self.assertEqual(legacy["spec"]["type"], "task")
@@ -75,10 +75,10 @@ class TaskMetadataTest(unittest.TestCase):
         self.assertEqual([item["id"] for item in tasks], ["TASK-001"])
 
         tagged = self.run_dibs(
-            "tag", "TASK-001", "--revision", "0", "--ack-unowned", "--add", "sqlite"
+            "tag", "TASK-001", "--add", "sqlite"
         )["task"]
         self.assertEqual(tagged["spec"]["tags"], ["audit", "database", "sqlite"])
-        self.assertEqual(tagged["revision"], 1)
+        self.assertEqual(tagged["revision"], 0)
         self.assertGreaterEqual(tagged["updated"], task["updated"])
 
     def test_version_two_database_migrates_in_place(self):

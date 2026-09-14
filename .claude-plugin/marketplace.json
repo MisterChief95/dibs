@@ -6,7 +6,13 @@
   "plugins": [
     {
       "name": "dibs",
+      "version": "1.2.0",
       "description": "Coordinate multiple local agents sharing one workspace so they don't overlap edits.",
+      "author": { "name": "Brendan Lackey", "url": "https://github.com/MisterChief95" },
+      "homepage": "https://github.com/MisterChief95/dibs",
+      "repository": "https://github.com/MisterChief95/dibs",
+      "license": "MIT",
+      "keywords": ["multi-agent", "coordination", "tasks", "file-locking"],
       "source": "./",
       "category": "productivity"
     }
