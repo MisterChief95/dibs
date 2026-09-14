@@ -12,6 +12,7 @@ Running several coding agents on the same checkout is easy to break: two agents 
 - **Expiring ownership leases** — claiming a task grants a time-limited, token-protected lease; leases must be renewed with a heartbeat or they expire and the task becomes reclaimable.
 - **Path and resource reservations** — an agent reserves the specific files, directory trees, or named resources (e.g. `git-index`) it's about to touch, so conflicting claims are rejected up front instead of discovered as a merge conflict.
 - **Handoffs and an audit log** — every claim, note, heartbeat, and status change is recorded, so any agent (or human) can reconstruct what happened and why.
+- **Searchable metadata** — tasks carry created/updated timestamps, an optional type, and tags, with indexed filters for large boards.
 
 ## How it works
 
@@ -55,7 +56,7 @@ In every case, the actual logic is the one script, [`.github/skills/dibs/scripts
 
 ## For agents: the worker lifecycle
 
-1. `init` the database once, then `import` a JSON task plan (ID, title, priority, dependencies, work areas, description, acceptance criteria).
+1. `init` the database once, then `import` a JSON task plan (ID, title, priority, dependencies, work areas, description, acceptance criteria, plus optional `type` and `tags`).
 2. Workers call `next` / `show` to find ready work, then `claim` or `claim-next` to take a task and reserve the paths/resources it needs.
 3. While working: `heartbeat` to renew the lease, `reserve`/`release` to adjust scope, `note` for progress updates, `handoff` to record context without releasing ownership.
 4. To finish: `review`, `complete`, `block`, or `cancel` — each releases the lease and any remaining reservations.
@@ -68,7 +69,7 @@ You don't need to read raw JSON or learn the CLI to see what's going on. Four re
 
 | Claude Code | Copilot Chat | Shows |
 |---|---|---|
-| `/dibs:list [status]` | `/dibs-list` | All tasks and their status, optionally filtered |
+| `/dibs:list [status]` | `/dibs-list` | All tasks and their status; the CLI also filters by timestamps, type, and tags |
 | `/dibs:show <TASK-ID>` | `/dibs-show` | One task's spec, owner/lease, dependencies, and handoff history |
 | `/dibs:next` | `/dibs-next` | Tasks that are ready to claim right now |
 | `/dibs:events [TASK-ID]` | `/dibs-events` | The audit log, optionally scoped to one task |

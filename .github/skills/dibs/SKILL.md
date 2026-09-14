@@ -51,13 +51,17 @@ Import a UTF-8 JSON plan with this shape:
       "depends_on": [],
       "work_areas": ["src/helper.py"],
       "description": "Define the behavior and intended scope.",
-      "acceptance": ["Targeted test passes"]
+      "acceptance": ["Targeted test passes"],
+      "type": "feature",
+      "tags": ["backend", "coordination"]
     }
   ]
 }
 ```
 
-Each task must contain exactly those seven fields. IDs match `[A-Z][A-Z0-9]*-<digits>`, priorities are `P0` through `P3`, dependencies must exist, dependency cycles are rejected, list values must be unique nonempty strings, and `acceptance` must not be empty. Import is additive and idempotent for identical existing specs; changing an existing task requires `amend` with optimistic-concurrency arguments.
+The original seven fields remain required. `type` and `tags` are optional; type defaults to `task`, and tags default to an empty list. Types and tags use lowercase letters, numbers, dots, underscores, and hyphens. IDs match `[A-Z][A-Z0-9]*-<digits>`, priorities are `P0` through `P3`, dependencies must exist, dependency cycles are rejected, list values must be unique nonempty strings, and `acceptance` must not be empty. Import is additive and idempotent for identical existing specs; changing an existing task requires `amend` with optimistic-concurrency arguments.
+
+Tasks record `created` and `updated` timestamps in the database. `list`, `next`, `claim-next`, and `export` accept `--type`, repeatable `--tag` (all supplied tags must match), and inclusive `--created-after`, `--created-before`, `--updated-after`, and `--updated-before` ISO-8601 filters. `list`, `next`, and `export` also accept `--status`.
 
 ## Worker lifecycle
 
@@ -90,13 +94,15 @@ To defer or drop work nobody has claimed, run `block` (from `todo` or `review`) 
 
 Resume `blocked` or `review` work with its current revision; this creates a fresh token. For an abandoned lease, first inspect the task, confirm the previous worker is quiescent, then use `reclaim --revision N --ack-quiescent`; reclaim preserves the abandoned task's reservations and returns a new token.
 
+Use `tag TASK --add TAG` or `--remove TAG` to change tags without resubmitting the full specification. Like `amend`, it requires the lease token for owned work, or the current revision plus `--ack-unowned` for unowned work. Both flags are repeatable.
+
 ## Command routing
 
 - Inspect: `list`, `show`, `next`, `events`.
 - Acquire: `claim`, `claim-next`, `resume`, `reclaim`.
-- Maintain an owned task: `heartbeat`, `reserve`, `release`, `note`, `handoff`.
+- Maintain an owned task: `heartbeat`, `reserve`, `release`, `note`, `handoff`, `tag`.
 - Release ownership: `block`, `review`, `complete`, `cancel`.
-- Administer: `init`, `import`, `amend`, `export`, `backup`.
+- Administer: `init`, `import`, `amend`, `tag`, `export`, `backup`.
 
 Use `COMMAND --help` for exact flags. `export --file` and `backup --file` create new files exclusively and will not overwrite an existing destination. `amend` requires the current revision plus the lease token for owned work, or `--ack-unowned` for unowned work.
 
