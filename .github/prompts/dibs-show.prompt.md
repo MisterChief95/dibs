@@ -1,5 +1,5 @@
 ---
-mode: agent
+agent: agent
 description: Show one dibs task's spec, lease, and handoff history
 ---
 Task ID: ${input:taskId:Which task ID?}
