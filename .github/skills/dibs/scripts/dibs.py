@@ -1,26 +1,35 @@
 """Local, cooperative task coordination. Run with --help; no third-party packages."""
 
 import argparse
-from contextlib import closing
-from datetime import datetime, timezone
 import hashlib
 import json
 import os
-from pathlib import Path, PureWindowsPath
 import re
 import sqlite3
 import sys
 import time
 import uuid
-
+from contextlib import closing
+from datetime import datetime, timezone
+from pathlib import Path, PureWindowsPath
 
 VERSION = 2
 EXIT = {"internal": 1, "conflict": 2, "invalid_input": 3, "storage": 4, "not_found": 5}
 SKILL_DIR = Path(__file__).resolve().parents[1]
 # os.path.isreserved is 3.13+; PureWindowsPath.is_reserved covers older runtimes.
-is_reserved = getattr(os.path, "isreserved", lambda part: PureWindowsPath(part).is_reserved())
+is_reserved = getattr(
+    os.path, "isreserved", lambda part: PureWindowsPath(part).is_reserved()
+)
 STATUSES = ("todo", "in_progress", "blocked", "review", "done", "cancelled")
-SPEC_KEYS = {"id", "title", "priority", "depends_on", "work_areas", "description", "acceptance"}
+SPEC_KEYS = {
+    "id",
+    "title",
+    "priority",
+    "depends_on",
+    "work_areas",
+    "description",
+    "acceptance",
+}
 MIGRATIONS = [
     [
         "CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
@@ -60,7 +69,13 @@ def fail(code, message):
 
 
 def encoded(value):
-    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    return json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
 
 
 def read_json(path):
@@ -72,9 +87,16 @@ def read_json(path):
             result[key] = value
         return result
 
-    text = sys.stdin.buffer.read().decode("utf-8-sig") if path == "-" else Path(path).read_text(encoding="utf-8-sig")
-    return json.loads(text, object_pairs_hook=unique,
-                      parse_constant=lambda value: fail("invalid_input", f"Invalid number: {value}"))
+    text = (
+        sys.stdin.buffer.read().decode("utf-8-sig")
+        if path == "-"
+        else Path(path).read_text(encoding="utf-8-sig")
+    )
+    return json.loads(
+        text,
+        object_pairs_hook=unique,
+        parse_constant=lambda value: fail("invalid_input", f"Invalid number: {value}"),
+    )
 
 
 def task_order(row):
@@ -89,7 +111,10 @@ def nonempty(value, name):
 
 def validate_spec(spec):
     if not isinstance(spec, dict) or set(spec) != SPEC_KEYS:
-        fail("invalid_input", "Task fields must be exactly: " + ", ".join(sorted(SPEC_KEYS)))
+        fail(
+            "invalid_input",
+            "Task fields must be exactly: " + ", ".join(sorted(SPEC_KEYS)),
+        )
     for field in ("id", "title", "description"):
         nonempty(spec[field], field)
     if not re.fullmatch(r"[A-Z][A-Z0-9]*-\d+", spec["id"]):
@@ -113,17 +138,25 @@ def validate_graph(specs):
     pending = {key: set(value["depends_on"]) for key, value in specs.items()}
     for key, deps in pending.items():
         if deps - specs.keys():
-            fail("invalid_input", f"{key}: unknown dependencies {sorted(deps - specs.keys())}")
+            fail(
+                "invalid_input",
+                f"{key}: unknown dependencies {sorted(deps - specs.keys())}",
+            )
     while pending:
         ready = {key for key, deps in pending.items() if not deps}
         if not ready:
             fail("invalid_input", "Dependency cycle: " + ", ".join(sorted(pending)))
-        pending = {key: deps - ready for key, deps in pending.items() if key not in ready}
+        pending = {
+            key: deps - ready for key, deps in pending.items() if key not in ready
+        }
 
 
 def wal_safe(version):
-    return version >= (3, 51, 3) or ((3, 50, 7) <= version < (3, 51, 0)) or (
-        (3, 44, 6) <= version < (3, 45, 0))
+    return (
+        version >= (3, 51, 3)
+        or ((3, 50, 7) <= version < (3, 51, 0))
+        or ((3, 44, 6) <= version < (3, 45, 0))
+    )
 
 
 class Store:
@@ -132,25 +165,37 @@ class Store:
         self.root = Path(args.workspace).resolve()
         if not self.root.is_dir():
             fail("invalid_input", "Workspace must be an existing directory")
-        self.path = Path(args.db).resolve() if args.db else self.root / ".dibs/tasks.sqlite3"
+        self.path = (
+            Path(args.db).resolve() if args.db else self.root / ".dibs/tasks.sqlite3"
+        )
         if str(self.path).startswith(("\\\\", "//")):
             fail("invalid_input", "Use a local disk, not a network path")
         for label, path in (("Workspace", self.root), ("Database", self.path)):
             if Path(os.path.normcase(path)).is_relative_to(os.path.normcase(SKILL_DIR)):
-                fail("invalid_input", f"{label} cannot be inside the skill directory ({SKILL_DIR})")
+                fail(
+                    "invalid_input",
+                    f"{label} cannot be inside the skill directory ({SKILL_DIR})",
+                )
         if args.command != "init" and not self.path.is_file():
             fail("not_found", "Database missing; run init first")
         if args.command == "init":
             self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.db = sqlite3.connect(self.path, timeout=args.busy_timeout / 1000, isolation_level=None)
+        self.db = sqlite3.connect(
+            self.path, timeout=args.busy_timeout / 1000, isolation_level=None
+        )
         try:
             self.db.row_factory = sqlite3.Row
             self.db.execute("PRAGMA foreign_keys=ON")
             self.db.execute("PRAGMA synchronous=FULL")
             if args.command != "init":
                 self.check_version()
-                if self.db.execute("PRAGMA journal_mode").fetchone()[0] == "wal" and not wal_safe(sqlite3.sqlite_version_info):
-                    fail("storage", "This runtime lacks the WAL fix; use a patched runtime")
+                if self.db.execute("PRAGMA journal_mode").fetchone()[
+                    0
+                ] == "wal" and not wal_safe(sqlite3.sqlite_version_info):
+                    fail(
+                        "storage",
+                        "This runtime lacks the WAL fix; use a patched runtime",
+                    )
         except BaseException:
             self.db.close()
             raise
@@ -158,8 +203,13 @@ class Store:
     def check_version(self):
         version = self.db.execute("PRAGMA user_version").fetchone()[0]
         if version != VERSION:
-            fail("storage", f"Schema {version}; expected {VERSION}. Run init to migrate older schemas")
-        row = self.db.execute("SELECT value FROM metadata WHERE key='workspace'").fetchone()
+            fail(
+                "storage",
+                f"Schema {version}; expected {VERSION}. Run init to migrate older schemas",
+            )
+        row = self.db.execute(
+            "SELECT value FROM metadata WHERE key='workspace'"
+        ).fetchone()
         if not row or row[0] != str(self.root).casefold():
             fail("invalid_input", "Database belongs to a different workspace")
 
@@ -174,20 +224,27 @@ class Store:
                 time.sleep(0.025 * (attempt + 1))
 
     def event(self, kind, task=None, data=None):
-        self.db.execute("INSERT INTO events(task_id,actor,type,data,timestamp) VALUES (?,?,?,?,?)",
-                        (task, self.args.actor, kind, encoded(data or {}), time.time()))
+        self.db.execute(
+            "INSERT INTO events(task_id,actor,type,data,timestamp) VALUES (?,?,?,?,?)",
+            (task, self.args.actor, kind, encoded(data or {}), time.time()),
+        )
 
     def initialize(self):
         version = self.db.execute("PRAGMA user_version").fetchone()[0]
         if version > VERSION:
             fail("storage", f"Schema {version} is newer than this tool")
         if version:
-            row = self.db.execute("SELECT value FROM metadata WHERE key='workspace'").fetchone()
+            row = self.db.execute(
+                "SELECT value FROM metadata WHERE key='workspace'"
+            ).fetchone()
             if not row or row[0] != str(self.root).casefold():
                 fail("invalid_input", "Database belongs to a different workspace")
         mode = self.args.journal
         if mode == "wal" and not wal_safe(sqlite3.sqlite_version_info):
-            fail("storage", f"SQLite {sqlite3.sqlite_version} lacks the WAL fix. Use init --journal delete explicitly")
+            fail(
+                "storage",
+                f"SQLite {sqlite3.sqlite_version} lacks the WAL fix. Use init --journal delete explicitly",
+            )
         current = self.db.execute(f"PRAGMA journal_mode={mode}").fetchone()[0]
         if current != mode:
             fail("storage", f"Could not select journal mode {mode}")
@@ -198,14 +255,24 @@ class Store:
             for statement in MIGRATIONS[number]:
                 self.db.execute(statement)
             self.db.execute(f"PRAGMA user_version={number + 1}")
-        self.db.execute("INSERT OR IGNORE INTO metadata VALUES ('workspace',?)", (str(self.root).casefold(),))
-        self.db.execute("INSERT OR REPLACE INTO metadata VALUES ('schema_version',?)", (str(VERSION),))
+        self.db.execute(
+            "INSERT OR IGNORE INTO metadata VALUES ('workspace',?)",
+            (str(self.root).casefold(),),
+        )
+        self.db.execute(
+            "INSERT OR REPLACE INTO metadata VALUES ('schema_version',?)",
+            (str(VERSION),),
+        )
         if version != VERSION:
             self.event("migrate", data={"from": version, "to": VERSION})
         self.db.commit()
         self.check_version()
-        return {"database": str(self.path), "schema_version": VERSION, "journal": current,
-                "sqlite_version": sqlite3.sqlite_version}
+        return {
+            "database": str(self.path),
+            "schema_version": VERSION,
+            "journal": current,
+            "sqlite_version": sqlite3.sqlite_version,
+        }
 
     def row(self, task):
         row = self.db.execute("SELECT * FROM tasks WHERE id=?", (task,)).fetchone()
@@ -219,28 +286,49 @@ class Store:
         row["abandoned"] = bool(row["token"] and row["expires"] <= time.time())
         if row["abandoned"]:
             if row["status"] != "blocked":
-                row["revision"] += 1  # Matches the next writer's materialized expiry event.
+                row["revision"] += (
+                    1  # Matches the next writer's materialized expiry event.
+                )
             row["status"] = "blocked"
         row.pop("token")
-        row["reservations"] = [dict(r) for r in self.db.execute(
-            "SELECT path,scope,expires FROM reservations WHERE task_id=? ORDER BY path", (task,))]
-        row["handoffs"] = [dict(r) | {"data": json.loads(r["data"])} for r in self.db.execute(
-            "SELECT * FROM handoffs WHERE task_id=? ORDER BY id", (task,))]
+        row["reservations"] = [
+            dict(r)
+            for r in self.db.execute(
+                "SELECT path,scope,expires FROM reservations WHERE task_id=? ORDER BY path",
+                (task,),
+            )
+        ]
+        row["handoffs"] = [
+            dict(r) | {"data": json.loads(r["data"])}
+            for r in self.db.execute(
+                "SELECT * FROM handoffs WHERE task_id=? ORDER BY id", (task,)
+            )
+        ]
         return row
 
     def expire(self):
-        for row in self.db.execute("SELECT id FROM tasks WHERE token IS NOT NULL AND expires<=? AND status!='blocked'",
-                                   (time.time(),)).fetchall():
-            self.db.execute("UPDATE tasks SET status='blocked',revision=revision+1,updated=? WHERE id=?",
-                            (time.time(), row["id"]))
+        for row in self.db.execute(
+            "SELECT id FROM tasks WHERE token IS NOT NULL AND expires<=? AND status!='blocked'",
+            (time.time(),),
+        ).fetchall():
+            self.db.execute(
+                "UPDATE tasks SET status='blocked',revision=revision+1,updated=? WHERE id=?",
+                (time.time(), row["id"]),
+            )
             self.event("abandoned", row["id"])
 
     def ready(self, row):
-        return not self.db.execute("""SELECT 1 FROM dependencies d JOIN tasks t ON t.id=d.requires_task_id
-            WHERE d.task_id=? AND t.status!='done' LIMIT 1""", (row["id"],)).fetchone()
+        return not self.db.execute(
+            """SELECT 1 FROM dependencies d JOIN tasks t ON t.id=d.requires_task_id
+            WHERE d.task_id=? AND t.status!='done' LIMIT 1""",
+            (row["id"],),
+        ).fetchone()
 
     def specs(self):
-        return {row["id"]: json.loads(row["spec"]) for row in self.db.execute("SELECT id,spec FROM tasks")}
+        return {
+            row["id"]: json.loads(row["spec"])
+            for row in self.db.execute("SELECT id,spec FROM tasks")
+        }
 
     def import_tasks(self):
         payload = read_json(self.args.file)
@@ -263,67 +351,120 @@ class Store:
         for task in added:
             spec = specs[task]
             now = time.time()
-            self.db.execute("INSERT INTO tasks(id,spec,priority,created,updated) VALUES (?,?,?,?,?)",
-                            (task, encoded(spec), spec["priority"], now, now))
+            self.db.execute(
+                "INSERT INTO tasks(id,spec,priority,created,updated) VALUES (?,?,?,?,?)",
+                (task, encoded(spec), spec["priority"], now, now),
+            )
         for task in added:
             for dep in specs[task]["depends_on"]:
                 self.db.execute("INSERT INTO dependencies VALUES (?,?)", (task, dep))
             self.event("import", task)
         digest = hashlib.sha256(encoded(payload).encode()).hexdigest()
-        self.db.execute("INSERT OR REPLACE INTO metadata VALUES ('import_hash',?)", (digest,))
-        self.db.execute("INSERT OR REPLACE INTO metadata VALUES ('import_source',?)",
-                        (encoded(payload.get("source", {})),))
-        return {"added": added, "unchanged": sorted(seen - set(added)), "import_hash": digest}
+        self.db.execute(
+            "INSERT OR REPLACE INTO metadata VALUES ('import_hash',?)", (digest,)
+        )
+        self.db.execute(
+            "INSERT OR REPLACE INTO metadata VALUES ('import_source',?)",
+            (encoded(payload.get("source", {})),),
+        )
+        return {
+            "added": added,
+            "unchanged": sorted(seen - set(added)),
+            "import_hash": digest,
+        }
 
     def reservation_keys(self, work_areas=()):
         result = []
-        requested = [(value, "file") for value in self.args.reserve_file] + [(value, "tree") for value in self.args.reserve_tree]
+        requested = [(value, "file") for value in self.args.reserve_file] + [
+            (value, "tree") for value in self.args.reserve_tree
+        ]
         # Work areas become tree reservations for existing directories, otherwise file reservations.
-        requested += [(value, "tree" if (self.root / value).is_dir() else "file") for value in work_areas]
+        requested += [
+            (value, "tree" if (self.root / value).is_dir() else "file")
+            for value in work_areas
+        ]
         for value, scope in requested:
             if any(char in value for char in "*?[]"):
-                fail("invalid_input", f"Reservations use literal paths, not globs: {value}")
+                fail(
+                    "invalid_input",
+                    f"Reservations use literal paths, not globs: {value}",
+                )
             path = Path(value)
-            if os.name == "nt" and any(":" in part or part.endswith((".", " ")) or
-                    is_reserved(part) for part in path.parts if part != path.anchor):
-                fail("invalid_input", "Windows device names, streams, and trailing dots/spaces are not reservation paths")
+            if os.name == "nt" and any(
+                ":" in part or part.endswith((".", " ")) or is_reserved(part)
+                for part in path.parts
+                if part != path.anchor
+            ):
+                fail(
+                    "invalid_input",
+                    "Windows device names, streams, and trailing dots/spaces are not reservation paths",
+                )
             path = (self.root / path).resolve()
             try:
                 path.relative_to(self.root)
             except ValueError:
                 fail("invalid_input", f"Reservation escapes workspace: {value}")
-            if (scope == "file" and path.is_dir()) or (scope == "tree" and path.is_file()):
+            if (scope == "file" and path.is_dir()) or (
+                scope == "tree" and path.is_file()
+            ):
                 fail("invalid_input", f"Wrong reservation scope: {value}")
             result.append((path.as_posix().casefold(), scope))
         for value in self.args.resource:
             if not re.fullmatch(r"[a-zA-Z0-9_.-]+", value):
-                fail("invalid_input", "Resource names use letters, numbers, underscore, dot, or hyphen")
+                fail(
+                    "invalid_input",
+                    "Resource names use letters, numbers, underscore, dot, or hyphen",
+                )
             result.append(("resource:" + value.casefold(), "resource"))
         return sorted(set(result))
 
     def conflicts(self, task, keys):
-        for row in self.db.execute("SELECT * FROM reservations WHERE task_id!=?", (task,)):
+        for row in self.db.execute(
+            "SELECT * FROM reservations WHERE task_id!=?", (task,)
+        ):
             for path, scope in keys:
                 other = row["path"]
-                if path == other or (scope == "tree" and other.startswith(path.rstrip("/") + "/")) or (
-                        row["scope"] == "tree" and path.startswith(other.rstrip("/") + "/")):
+                if (
+                    path == other
+                    or (scope == "tree" and other.startswith(path.rstrip("/") + "/"))
+                    or (
+                        row["scope"] == "tree"
+                        and path.startswith(other.rstrip("/") + "/")
+                    )
+                ):
                     return f"{path} conflicts with {row['task_id']}: {other} (including expired reservations)"
         return None
 
     def claim(self):
         args = self.args
-        candidates = sorted(self.db.execute("SELECT * FROM tasks WHERE status='todo'"), key=task_order) if (
-            args.command == "claim-next") else [self.row(args.task)]
+        candidates = (
+            sorted(
+                self.db.execute("SELECT * FROM tasks WHERE status='todo'"),
+                key=task_order,
+            )
+            if (args.command == "claim-next")
+            else [self.row(args.task)]
+        )
         for row in candidates:
             allowed = ("blocked", "review") if args.command == "resume" else ("todo",)
             if row["status"] not in allowed or row["token"] or not self.ready(row):
                 if args.command == "claim-next":
                     continue
-                fail("conflict", "Task not claimable: check status, dependencies, and abandoned lease")
+                fail(
+                    "conflict",
+                    "Task not claimable: check status, dependencies, and abandoned lease",
+                )
             if args.command == "resume" and args.revision != row["revision"]:
-                fail("conflict", f"Revision changed; current revision is {row['revision']}")
+                fail(
+                    "conflict",
+                    f"Revision changed; current revision is {row['revision']}",
+                )
             try:
-                keys = self.reservation_keys(json.loads(row["spec"])["work_areas"] if args.reserve_work_areas else ())
+                keys = self.reservation_keys(
+                    json.loads(row["spec"])["work_areas"]
+                    if args.reserve_work_areas
+                    else ()
+                )
             except DibsError as error:
                 fail(error.code, f"{row['id']}: {error}")
             conflict = self.conflicts(row["id"], keys)
@@ -332,10 +473,16 @@ class Store:
                     continue
                 fail("conflict", conflict)
             token, expires = uuid.uuid4().hex, time.time() + args.lease_seconds
-            self.db.execute("""UPDATE tasks SET status='in_progress',owner=?,token=?,expires=?,
-                revision=revision+1,updated=? WHERE id=?""", (args.actor, token, expires, time.time(), row["id"]))
+            self.db.execute(
+                """UPDATE tasks SET status='in_progress',owner=?,token=?,expires=?,
+                revision=revision+1,updated=? WHERE id=?""",
+                (args.actor, token, expires, time.time(), row["id"]),
+            )
             for path, scope in keys:
-                self.db.execute("INSERT INTO reservations VALUES (?,?,?,?,?)", (path, scope, row["id"], token, expires))
+                self.db.execute(
+                    "INSERT INTO reservations VALUES (?,?,?,?,?)",
+                    (path, scope, row["id"], token, expires),
+                )
             self.event(args.command, row["id"], {"reservations": keys})
             return {"task": self.detail(row["id"]), "lease_token": token}
         fail("conflict", "No ready task with the requested reservations")
@@ -347,15 +494,23 @@ class Store:
     def require_lease(self, row, allow_expired=False):
         # Only the lease holder can change owned work, so the revision is an optional extra guard.
         self.check_revision(row)
-        if not row["token"] or row["token"] != self.args.token or row["owner"] != self.args.actor or (
-                row["expires"] <= time.time() and not allow_expired):
+        if (
+            not row["token"]
+            or row["token"] != self.args.token
+            or row["owner"] != self.args.actor
+            or (row["expires"] <= time.time() and not allow_expired)
+        ):
             fail("conflict", "A valid, unexpired owner lease is required")
 
     def handoff(self, task):
         data = read_json(self.args.file)
         fields = {"summary", "next_steps", "changed_files", "checks", "blockers"}
         if not isinstance(data, dict) or "summary" not in data or set(data) - fields:
-            fail("invalid_input", "Handoff requires summary; optional arrays: " + ", ".join(sorted(fields - {"summary"})))
+            fail(
+                "invalid_input",
+                "Handoff requires summary; optional arrays: "
+                + ", ".join(sorted(fields - {"summary"})),
+            )
         data = {key: [] for key in fields} | data
         nonempty(data["summary"], "summary")
         for key in fields - {"summary"}:
@@ -369,15 +524,25 @@ class Store:
             fail("invalid_input", "Cannot complete with unresolved blockers")
         if self.args.command == "block" and not data["blockers"]:
             fail("invalid_input", "Blocking requires a specific blocker")
-        self.db.execute("INSERT INTO handoffs(task_id,actor,data,timestamp) VALUES (?,?,?,?)",
-                        (task, self.args.actor, encoded(data), time.time()))
+        self.db.execute(
+            "INSERT INTO handoffs(task_id,actor,data,timestamp) VALUES (?,?,?,?)",
+            (task, self.args.actor, encoded(data), time.time()),
+        )
         return data
 
     def end_ownership(self, row):
-        status = {"block": "blocked", "review": "review", "complete": "done", "cancel": "cancelled"}[self.args.command]
+        status = {
+            "block": "blocked",
+            "review": "review",
+            "complete": "done",
+            "cancel": "cancelled",
+        }[self.args.command]
         if status == "done" and not self.ready(row):
             fail("conflict", "Unfinished dependencies prevent completion")
-        self.db.execute("UPDATE tasks SET status=?,owner=NULL,token=NULL,expires=NULL WHERE id=?", (status, row["id"]))
+        self.db.execute(
+            "UPDATE tasks SET status=?,owner=NULL,token=NULL,expires=NULL WHERE id=?",
+            (status, row["id"]),
+        )
         self.db.execute("DELETE FROM reservations WHERE task_id=?", (row["id"],))
 
     def mutate(self):
@@ -385,16 +550,27 @@ class Store:
         row = self.row(args.task)
         if args.command == "reclaim":
             if not args.ack_quiescent:
-                fail("invalid_input", "Reclaim requires --ack-quiescent after stopping/inspecting the old worker")
+                fail(
+                    "invalid_input",
+                    "Reclaim requires --ack-quiescent after stopping/inspecting the old worker",
+                )
             if not row["token"] or row["expires"] > time.time():
                 fail("conflict", "Only abandoned leases can be reclaimed")
             # Expiry materialization may bump revision by one; require the fresh show revision.
             if args.revision != row["revision"]:
-                fail("conflict", f"Revision changed; current revision is {row['revision']}")
+                fail(
+                    "conflict",
+                    f"Revision changed; current revision is {row['revision']}",
+                )
             token, expires = uuid.uuid4().hex, time.time() + args.lease_seconds
-            self.db.execute("UPDATE tasks SET status='in_progress',owner=?,token=?,expires=? WHERE id=?",
-                            (args.actor, token, expires, args.task))
-            self.db.execute("UPDATE reservations SET token=?,expires=? WHERE task_id=?", (token, expires, args.task))
+            self.db.execute(
+                "UPDATE tasks SET status='in_progress',owner=?,token=?,expires=? WHERE id=?",
+                (args.actor, token, expires, args.task),
+            )
+            self.db.execute(
+                "UPDATE reservations SET token=?,expires=? WHERE task_id=?",
+                (token, expires, args.task),
+            )
             data = {"previous_owner": row["owner"], "quiescent_acknowledged": True}
         elif args.command == "note":
             # Notes only append to the audit log, so any actor may add one.
@@ -404,8 +580,17 @@ class Store:
         elif args.command in ("block", "cancel") and not row["token"]:
             # Unclaimed work can be deferred or dropped; the transaction lock guarantees nobody holds a lease.
             if args.revision != row["revision"] or not args.ack_unowned:
-                fail("conflict", "Unclaimed block/cancel requires current --revision and --ack-unowned")
-            if row["status"] not in {"block": ("todo", "review"), "cancel": ("todo", "blocked", "review")}[args.command]:
+                fail(
+                    "conflict",
+                    "Unclaimed block/cancel requires current --revision and --ack-unowned",
+                )
+            if (
+                row["status"]
+                not in {
+                    "block": ("todo", "review"),
+                    "cancel": ("todo", "blocked", "review"),
+                }[args.command]
+            ):
                 fail("conflict", f"Cannot {args.command} a {row['status']} task")
             data = self.handoff(args.task)
             self.end_ownership(row)
@@ -417,8 +602,14 @@ class Store:
                 if row["expires"] <= time.time():
                     data = {"recovered": True}
                 expires = time.time() + args.lease_seconds
-                self.db.execute("UPDATE tasks SET status='in_progress',expires=? WHERE id=?", (expires, args.task))
-                self.db.execute("UPDATE reservations SET expires=? WHERE task_id=?", (expires, args.task))
+                self.db.execute(
+                    "UPDATE tasks SET status='in_progress',expires=? WHERE id=?",
+                    (expires, args.task),
+                )
+                self.db.execute(
+                    "UPDATE reservations SET expires=? WHERE task_id=?",
+                    (expires, args.task),
+                )
             elif args.command in ("reserve", "release"):
                 keys = self.reservation_keys()
                 if not keys:
@@ -428,11 +619,15 @@ class Store:
                     fail("conflict", conflict)
                 for path, scope in keys:
                     if args.command == "reserve":
-                        self.db.execute("INSERT OR IGNORE INTO reservations VALUES (?,?,?,?,?)",
-                                        (path, scope, args.task, row["token"], row["expires"]))
+                        self.db.execute(
+                            "INSERT OR IGNORE INTO reservations VALUES (?,?,?,?,?)",
+                            (path, scope, args.task, row["token"], row["expires"]),
+                        )
                     else:
-                        deleted = self.db.execute("DELETE FROM reservations WHERE path=? AND scope=? AND task_id=?",
-                                                  (path, scope, args.task)).rowcount
+                        deleted = self.db.execute(
+                            "DELETE FROM reservations WHERE path=? AND scope=? AND task_id=?",
+                            (path, scope, args.task),
+                        ).rowcount
                         if not deleted:
                             fail("conflict", f"Reservation not owned: {path}")
                 data = {"reservations": keys}
@@ -440,9 +635,15 @@ class Store:
                 data = self.handoff(args.task)
                 if args.command in ("block", "review", "complete", "cancel"):
                     if not args.ack_quiescent:
-                        fail("invalid_input", "Releasing ownership requires --ack-quiescent (editing stopped)")
+                        fail(
+                            "invalid_input",
+                            "Releasing ownership requires --ack-quiescent (editing stopped)",
+                        )
                     self.end_ownership(row)
-        self.db.execute("UPDATE tasks SET revision=revision+1,updated=? WHERE id=?", (time.time(), args.task))
+        self.db.execute(
+            "UPDATE tasks SET revision=revision+1,updated=? WHERE id=?",
+            (time.time(), args.task),
+        )
         self.event(args.command, args.task, data)
         result = {"task": self.detail(args.task)}
         if args.command == "reclaim":
@@ -455,7 +656,10 @@ class Store:
         if row["token"]:
             self.require_lease(row)
         elif args.revision != row["revision"] or not args.ack_unowned:
-            fail("conflict", "Unowned amendments require current --revision and --ack-unowned")
+            fail(
+                "conflict",
+                "Unowned amendments require current --revision and --ack-unowned",
+            )
         spec = read_json(args.file)
         validate_spec(spec)
         if spec["id"] != args.task:
@@ -463,14 +667,23 @@ class Store:
         specs = self.specs()
         specs[args.task] = spec
         validate_graph(specs)
-        if row["status"] in ("in_progress", "review", "done") and any(self.row(dep)["status"] != "done" for dep in spec["depends_on"]):
-            fail("conflict", "Cannot add unfinished prerequisites to active/completed work")
-        self.db.execute("UPDATE tasks SET spec=?,priority=?,revision=revision+1,updated=? WHERE id=?",
-                        (encoded(spec), spec["priority"], time.time(), args.task))
+        if row["status"] in ("in_progress", "review", "done") and any(
+            self.row(dep)["status"] != "done" for dep in spec["depends_on"]
+        ):
+            fail(
+                "conflict",
+                "Cannot add unfinished prerequisites to active/completed work",
+            )
+        self.db.execute(
+            "UPDATE tasks SET spec=?,priority=?,revision=revision+1,updated=? WHERE id=?",
+            (encoded(spec), spec["priority"], time.time(), args.task),
+        )
         self.db.execute("DELETE FROM dependencies WHERE task_id=?", (args.task,))
         for dep in spec["depends_on"]:
             self.db.execute("INSERT INTO dependencies VALUES (?,?)", (args.task, dep))
-        self.event("amend", args.task, {"before": json.loads(row["spec"]), "after": spec})
+        self.event(
+            "amend", args.task, {"before": json.loads(row["spec"]), "after": spec}
+        )
         return {"task": self.detail(args.task)}
 
     def read(self):
@@ -480,22 +693,35 @@ class Store:
         if args.command == "events":
             if args.task:
                 self.row(args.task)
-            rows = self.db.execute("""SELECT * FROM events WHERE sequence>? AND (? IS NULL OR task_id=?)
-                ORDER BY sequence LIMIT ?""", (args.after, args.task, args.task, args.limit))
+            rows = self.db.execute(
+                """SELECT * FROM events WHERE sequence>? AND (? IS NULL OR task_id=?)
+                ORDER BY sequence LIMIT ?""",
+                (args.after, args.task, args.task, args.limit),
+            )
             return {"events": [dict(r) | {"data": json.loads(r["data"])} for r in rows]}
         tasks = []
-        for row in sorted(self.db.execute("SELECT * FROM tasks").fetchall(), key=task_order):
+        for row in sorted(
+            self.db.execute("SELECT * FROM tasks").fetchall(), key=task_order
+        ):
             detail = self.detail(row["id"])
-            detail["ready"] = row["status"] == "todo" and not row["token"] and self.ready(row)
+            detail["ready"] = (
+                row["status"] == "todo" and not row["token"] and self.ready(row)
+            )
             if args.command == "next" and not detail["ready"]:
                 continue
             if args.status and detail["status"] != args.status:
                 continue
             tasks.append(detail)
         if args.command == "export":
-            return {"schema_version": VERSION, "tasks": tasks,
-                    "events": [dict(r) | {"data": json.loads(r["data"])} for r in self.db.execute("SELECT * FROM events ORDER BY sequence")],
-                    "metadata": dict(self.db.execute("SELECT key,value FROM metadata"))}
+            return {
+                "schema_version": VERSION,
+                "tasks": tasks,
+                "events": [
+                    dict(r) | {"data": json.loads(r["data"])}
+                    for r in self.db.execute("SELECT * FROM events ORDER BY sequence")
+                ],
+                "metadata": dict(self.db.execute("SELECT key,value FROM metadata")),
+            }
         return {"tasks": tasks}
 
     def run(self):
@@ -505,15 +731,20 @@ class Store:
         if args.command == "backup":
             target = Path(args.file).resolve()
             if target == self.path:
-                fail("invalid_input", "Backup destination must differ from the live database")
+                fail(
+                    "invalid_input",
+                    "Backup destination must differ from the live database",
+                )
             # Exclusive creation prevents accidental replacement of an earlier backup.
             with target.open("xb"):
                 pass
             try:
                 deadline = time.monotonic() + 10
+
                 def progress(status, remaining, total):
                     if time.monotonic() > deadline:
                         fail("storage", "Backup timed out; retry after writers finish")
+
                 with closing(sqlite3.connect(target)) as dest:
                     self.db.backup(dest, pages=128, progress=progress, sleep=0.05)
                 return {"backup": str(target)}
@@ -530,7 +761,10 @@ class Store:
                 with target.open("x", encoding="utf-8") as out:
                     json.dump(result, out, indent=2, ensure_ascii=False)
                     out.write("\n")
-                return {"export": str(target.resolve()), "task_count": len(result["tasks"])}
+                return {
+                    "export": str(target.resolve()),
+                    "task_count": len(result["tasks"]),
+                }
             return result
         self.begin()
         self.expire()
@@ -551,8 +785,12 @@ class Store:
 
 class Parser(argparse.ArgumentParser):
     def __init__(self, *args, **kwargs):
-        kwargs.setdefault("formatter_class", lambda prog: argparse.RawDescriptionHelpFormatter(
-            prog, width=96, max_help_position=30))
+        kwargs.setdefault(
+            "formatter_class",
+            lambda prog: argparse.RawDescriptionHelpFormatter(
+                prog, width=96, max_help_position=30
+            ),
+        )
         super().__init__(*args, **kwargs)
 
     def error(self, message):
@@ -563,22 +801,50 @@ def parser():
     common = Parser(add_help=False)
     general = common.add_argument_group("common options")
     env = os.environ.get
-    general.add_argument("--workspace", metavar="DIR", default=env("DIBS_WORKSPACE"), required=not env("DIBS_WORKSPACE"),
-                         help="Workspace directory (required unless DIBS_WORKSPACE is set)")
-    general.add_argument("--db", metavar="PATH", default=env("DIBS_DB"), help="Database (default: DIBS_DB, else WORKSPACE/.dibs/tasks.sqlite3)")
-    general.add_argument("--actor", metavar="NAME", default=env("DIBS_ACTOR") or env("USERNAME", "local"), help="Agent identity (default: DIBS_ACTOR, USERNAME, or local)")
-    general.add_argument("--json", action="store_true", help="Compact JSON output, including errors")
-    general.add_argument("--busy-timeout", metavar="MS", type=int, default=2000, help="Wait per lock attempt (default: 2000 ms; up to 3 attempts)")
-    p = Parser(usage="%(prog)s COMMAND [options]", description="Coordinate local agent tasks, ownership, and file reservations.",
-               epilog="""Examples:
+    general.add_argument(
+        "--workspace",
+        metavar="DIR",
+        default=env("DIBS_WORKSPACE"),
+        required=not env("DIBS_WORKSPACE"),
+        help="Workspace directory (required unless DIBS_WORKSPACE is set)",
+    )
+    general.add_argument(
+        "--db",
+        metavar="PATH",
+        default=env("DIBS_DB"),
+        help="Database (default: DIBS_DB, else WORKSPACE/.dibs/tasks.sqlite3)",
+    )
+    general.add_argument(
+        "--actor",
+        metavar="NAME",
+        default=env("DIBS_ACTOR") or env("USERNAME", "local"),
+        help="Agent identity (default: DIBS_ACTOR, USERNAME, or local)",
+    )
+    general.add_argument(
+        "--json", action="store_true", help="Compact JSON output, including errors"
+    )
+    general.add_argument(
+        "--busy-timeout",
+        metavar="MS",
+        type=int,
+        default=2000,
+        help="Wait per lock attempt (default: 2000 ms; up to 3 attempts)",
+    )
+    p = Parser(
+        usage="%(prog)s COMMAND [options]",
+        description="Coordinate local agent tasks, ownership, and file reservations.",
+        epilog="""Examples:
   %(prog)s next --workspace . --json
   %(prog)s show COMPAT-001 --workspace .
   %(prog)s claim COMPAT-001 --workspace . --actor agent-1 --reserve-tree tests/fixtures
 
 Put options after the command. Run COMMAND --help for its arguments.
 Environment defaults: DIBS_WORKSPACE, DIBS_DB, DIBS_ACTOR, DIBS_TOKEN.
-Exit codes: 0 success | 1 internal | 2 conflict | 3 invalid input | 4 storage | 5 not found""")
-    sub = p.add_subparsers(dest="command", required=True, title="commands", metavar="COMMAND", prog=p.prog)
+Exit codes: 0 success | 1 internal | 2 conflict | 3 invalid input | 4 storage | 5 not found""",
+    )
+    sub = p.add_subparsers(
+        dest="command", required=True, title="commands", metavar="COMMAND", prog=p.prog
+    )
     commands = {
         "init": "Initialize or migrate the coordination database",
         "import": "Import task specifications without resetting progress",
@@ -604,57 +870,200 @@ Exit codes: 0 success | 1 internal | 2 conflict | 3 invalid input | 4 storage | 
         "events": "Read the append-only audit log",
     }
     for name, description in commands.items():
-        has_task = name not in ("init", "import", "list", "next", "claim-next", "export", "backup", "events")
-        s = sub.add_parser(name, parents=[common], help=description, description=description + ".",
-                           usage="%(prog)s" + (" TASK" if has_task else "") + " [options]")
+        has_task = name not in (
+            "init",
+            "import",
+            "list",
+            "next",
+            "claim-next",
+            "export",
+            "backup",
+            "events",
+        )
+        s = sub.add_parser(
+            name,
+            parents=[common],
+            help=description,
+            description=description + ".",
+            usage="%(prog)s" + (" TASK" if has_task else "") + " [options]",
+        )
         if has_task:
             s.add_argument("task", metavar="TASK", help="Task ID, e.g. COMPAT-001")
         options = s.add_argument_group("command options")
         if name == "init":
-            options.add_argument("--journal", choices=("wal", "delete"), default="wal", help="Journal mode (default: wal; use delete for older SQLite)")
-        if name in ("import", "handoff", "block", "review", "complete", "cancel", "amend", "backup", "export"):
-            file_help = "New snapshot destination" if name in ("backup", "export") else "JSON input file, or - for stdin"
-            options.add_argument("--file", metavar="PATH", required=name != "export", help=file_help + (" (required)" if name != "export" else " (default: stdout)"))
+            options.add_argument(
+                "--journal",
+                choices=("wal", "delete"),
+                default="wal",
+                help="Journal mode (default: wal; use delete for older SQLite)",
+            )
+        if name in (
+            "import",
+            "handoff",
+            "block",
+            "review",
+            "complete",
+            "cancel",
+            "amend",
+            "backup",
+            "export",
+        ):
+            file_help = (
+                "New snapshot destination"
+                if name in ("backup", "export")
+                else "JSON input file, or - for stdin"
+            )
+            options.add_argument(
+                "--file",
+                metavar="PATH",
+                required=name != "export",
+                help=file_help
+                + (" (required)" if name != "export" else " (default: stdout)"),
+            )
         if name in ("list", "next", "export"):
-            options.add_argument("--status", metavar="STATE", choices=STATUSES, help="Filter: " + ", ".join(STATUSES))
+            options.add_argument(
+                "--status",
+                metavar="STATE",
+                choices=STATUSES,
+                help="Filter: " + ", ".join(STATUSES),
+            )
         if name in ("claim", "claim-next", "resume", "reserve", "release"):
-            paths = s.add_argument_group("reservations (repeatable; literal paths, not globs)")
-            paths.add_argument("--reserve-file", metavar="PATH", action="append", default=[], help="Exact workspace file")
-            paths.add_argument("--reserve-tree", metavar="DIR", action="append", default=[], help="Workspace directory and everything beneath it")
-            paths.add_argument("--resource", metavar="NAME", action="append", default=[], help="Shared resource, e.g. git-index")
+            paths = s.add_argument_group(
+                "reservations (repeatable; literal paths, not globs)"
+            )
+            paths.add_argument(
+                "--reserve-file",
+                metavar="PATH",
+                action="append",
+                default=[],
+                help="Exact workspace file",
+            )
+            paths.add_argument(
+                "--reserve-tree",
+                metavar="DIR",
+                action="append",
+                default=[],
+                help="Workspace directory and everything beneath it",
+            )
+            paths.add_argument(
+                "--resource",
+                metavar="NAME",
+                action="append",
+                default=[],
+                help="Shared resource, e.g. git-index",
+            )
             if name in ("claim", "claim-next", "resume"):
-                paths.add_argument("--reserve-work-areas", action="store_true", help="Also reserve the claimed task's work_areas (dirs as trees)")
+                paths.add_argument(
+                    "--reserve-work-areas",
+                    action="store_true",
+                    help="Also reserve the claimed task's work_areas (dirs as trees)",
+                )
         ownership = s.add_argument_group("ownership and lease")
         if name in ("claim", "claim-next", "resume", "heartbeat", "reclaim"):
-            ownership.add_argument("--lease-seconds", metavar="SECONDS", type=int, default=600, help="Lease duration (default: 600; range: 1..86400)")
-        if name in ("heartbeat", "reserve", "release", "note", "handoff", "block", "review", "complete", "cancel", "amend", "resume", "reclaim"):
+            ownership.add_argument(
+                "--lease-seconds",
+                metavar="SECONDS",
+                type=int,
+                default=600,
+                help="Lease duration (default: 600; range: 1..86400)",
+            )
+        if name in (
+            "heartbeat",
+            "reserve",
+            "release",
+            "note",
+            "handoff",
+            "block",
+            "review",
+            "complete",
+            "cancel",
+            "amend",
+            "resume",
+            "reclaim",
+        ):
             required = name in ("resume", "reclaim")
-            ownership.add_argument("--revision", metavar="N", type=int, required=required, help="Latest returned task revision" + (
-                " (required)" if required else " (optional guard with a lease; required for unclaimed amend/block/cancel)"))
-        if name in ("heartbeat", "reserve", "release", "handoff", "block", "review", "complete", "cancel", "amend"):
+            ownership.add_argument(
+                "--revision",
+                metavar="N",
+                type=int,
+                required=required,
+                help="Latest returned task revision"
+                + (
+                    " (required)"
+                    if required
+                    else " (optional guard with a lease; required for unclaimed amend/block/cancel)"
+                ),
+            )
+        if name in (
+            "heartbeat",
+            "reserve",
+            "release",
+            "handoff",
+            "block",
+            "review",
+            "complete",
+            "cancel",
+            "amend",
+        ):
             unclaimed_ok = name in ("amend", "block", "cancel")
-            ownership.add_argument("--token", metavar="TOKEN", default=env("DIBS_TOKEN"), required=not unclaimed_ok and not env("DIBS_TOKEN"),
-                                   help="Lease token from claim/resume/reclaim (default: DIBS_TOKEN)" + (" (required for owned tasks)" if unclaimed_ok else ""))
+            ownership.add_argument(
+                "--token",
+                metavar="TOKEN",
+                default=env("DIBS_TOKEN"),
+                required=not unclaimed_ok and not env("DIBS_TOKEN"),
+                help="Lease token from claim/resume/reclaim (default: DIBS_TOKEN)"
+                + (" (required for owned tasks)" if unclaimed_ok else ""),
+            )
         if name in ("block", "review", "complete", "cancel", "reclaim"):
-            ownership.add_argument("--ack-quiescent", action="store_true", help="Acknowledge editing stopped before release/takeover")
+            ownership.add_argument(
+                "--ack-quiescent",
+                action="store_true",
+                help="Acknowledge editing stopped before release/takeover",
+            )
         if name in ("amend", "block", "cancel"):
-            ownership.add_argument("--ack-unowned", action="store_true", help="Acknowledge acting on unclaimed work (requires --revision)")
+            ownership.add_argument(
+                "--ack-unowned",
+                action="store_true",
+                help="Acknowledge acting on unclaimed work (requires --revision)",
+            )
         if name == "note":
-            options.add_argument("--message", metavar="TEXT", required=True, help="Finding or progress note (required)")
+            options.add_argument(
+                "--message",
+                metavar="TEXT",
+                required=True,
+                help="Finding or progress note (required)",
+            )
         if name == "events":
-            options.add_argument("--task", metavar="TASK", help="Only events for this task")
-            options.add_argument("--after", metavar="N", type=int, default=0, help="Only sequences greater than N (default: 0)")
-            options.add_argument("--limit", metavar="N", type=int, default=100, help="Maximum events (default: 100; range: 1..10000)")
+            options.add_argument(
+                "--task", metavar="TASK", help="Only events for this task"
+            )
+            options.add_argument(
+                "--after",
+                metavar="N",
+                type=int,
+                default=0,
+                help="Only sequences greater than N (default: 0)",
+            )
+            options.add_argument(
+                "--limit",
+                metavar="N",
+                type=int,
+                default=100,
+                help="Maximum events (default: 100; range: 1..10000)",
+            )
     return p
 
 
 def human_output(result, command):
     """Small text views for inspection; --json retains the complete API response."""
+
     def one_line(value):
         return " ".join(str(value).split())
 
     def timestamp(value):
-        return datetime.fromtimestamp(value, timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        return datetime.fromtimestamp(value, timezone.utc).strftime(
+            "%Y-%m-%d %H:%M:%S UTC"
+        )
 
     if not result["ok"]:
         error = result["error"]
@@ -665,53 +1074,112 @@ def human_output(result, command):
         tasks = result["tasks"]
         if not tasks:
             return "No ready tasks." if command == "next" else "No matching tasks."
-        rows = [[t["id"], t["priority"], t["status"], "yes" if t.get("ready") else "-",
-                 one_line(t["owner"] or "-"), one_line(t["spec"]["title"])] for t in tasks]
+        rows = [
+            [
+                t["id"],
+                t["priority"],
+                t["status"],
+                "yes" if t.get("ready") else "-",
+                one_line(t["owner"] or "-"),
+                one_line(t["spec"]["title"]),
+            ]
+            for t in tasks
+        ]
         headers = ["TASK", "PRI", "STATUS", "READY", "OWNER", "TITLE"]
-        widths = [max(len(row[i]) for row in [headers, *rows]) for i in range(len(headers) - 1)]
+        widths = [
+            max(len(row[i]) for row in [headers, *rows])
+            for i in range(len(headers) - 1)
+        ]
+
         def line(row):
-            return "  ".join(value.ljust(width) for value, width in zip(row[:-1], widths)) + "  " + row[-1]
-        return "\n".join([line(headers), *map(line, rows), "", f"{len(tasks)} task(s). Use show TASK for details."])
+            return (
+                "  ".join(value.ljust(width) for value, width in zip(row[:-1], widths))
+                + "  "
+                + row[-1]
+            )
+
+        return "\n".join(
+            [
+                line(headers),
+                *map(line, rows),
+                "",
+                f"{len(tasks)} task(s). Use show TASK for details.",
+            ]
+        )
     if "task" in result:
         task = result["task"]
         spec = task["spec"]
-        lines = [f"{task['id']}  {spec['title']}",
-                 f"Status: {task['status']} | Priority: {task['priority']} | Revision: {task['revision']}",
-                 f"Owner: {task['owner'] or '-'}"]
+        lines = [
+            f"{task['id']}  {spec['title']}",
+            f"Status: {task['status']} | Priority: {task['priority']} | Revision: {task['revision']}",
+            f"Owner: {task['owner'] or '-'}",
+        ]
         if task["expires"] is not None:
-            lines.append(f"Lease expires: {timestamp(task['expires'])}" + (" (abandoned)" if task["abandoned"] else ""))
+            lines.append(
+                f"Lease expires: {timestamp(task['expires'])}"
+                + (" (abandoned)" if task["abandoned"] else "")
+            )
         if "lease_token" in result:
             lines.append(f"Lease token: {result['lease_token']}")
         if task["reservations"]:
             lines.append("Reservations:")
             lines.extend(f"  - {r['scope']}: {r['path']}" for r in task["reservations"])
         if command == "show":
-            lines.extend([f"Depends on: {', '.join(spec['depends_on']) or 'none'}", "", spec["description"]])
-            for title, values in (("Work areas", spec["work_areas"]), ("Acceptance", spec["acceptance"])):
+            lines.extend(
+                [
+                    f"Depends on: {', '.join(spec['depends_on']) or 'none'}",
+                    "",
+                    spec["description"],
+                ]
+            )
+            for title, values in (
+                ("Work areas", spec["work_areas"]),
+                ("Acceptance", spec["acceptance"]),
+            ):
                 lines.extend(["", title + ":", *[f"  - {value}" for value in values]])
         if task["handoffs"] and command in ("show", "resume", "reclaim"):
             latest = task["handoffs"][-1]
             data = latest["data"]
-            lines.extend(["", f"Latest handoff ({latest['actor']}, {timestamp(latest['timestamp'])}):", data["summary"]])
-            for key, label in (("next_steps", "Next steps"), ("checks", "Checks"),
-                               ("blockers", "Blockers"), ("changed_files", "Changed files")):
+            lines.extend(
+                [
+                    "",
+                    f"Latest handoff ({latest['actor']}, {timestamp(latest['timestamp'])}):",
+                    data["summary"],
+                ]
+            )
+            for key, label in (
+                ("next_steps", "Next steps"),
+                ("checks", "Checks"),
+                ("blockers", "Blockers"),
+                ("changed_files", "Changed files"),
+            ):
                 if data[key]:
-                    lines.extend([label + ":", *[f"  - {value}" for value in data[key]]])
+                    lines.extend(
+                        [label + ":", *[f"  - {value}" for value in data[key]]]
+                    )
             if len(task["handoffs"]) > 1:
-                lines.append(f"{len(task['handoffs'])} handoffs total; use show {task['id']} --json for all.")
+                lines.append(
+                    f"{len(task['handoffs'])} handoffs total; use show {task['id']} --json for all."
+                )
         return "\n".join(lines)
     if "events" in result:
         lines = []
         for event in result["events"]:
             data = event["data"]
             summary = data.get("message") or data.get("summary") or ""
-            lines.append(f"{event['sequence']}  {timestamp(event['timestamp'])}  {event['task_id'] or '-'}  "
-                         f"{event['type']}  {one_line(event['actor'])}" + (f"  {one_line(summary)}" if summary else ""))
+            lines.append(
+                f"{event['sequence']}  {timestamp(event['timestamp'])}  {event['task_id'] or '-'}  "
+                f"{event['type']}  {one_line(event['actor'])}"
+                + (f"  {one_line(summary)}" if summary else "")
+            )
         return "\n".join(lines) if lines else "No matching events."
     if "added" in result:
         return f"Imported {len(result['added'])} task(s); {len(result['unchanged'])} unchanged."
-    return "\n".join(f"{key.replace('_', ' ').capitalize()}: {value}" for key, value in result.items()
-                     if key not in ("ok", "error"))
+    return "\n".join(
+        f"{key.replace('_', ' ').capitalize()}: {value}"
+        for key, value in result.items()
+        if key not in ("ok", "error")
+    )
 
 
 def main():
@@ -724,8 +1192,13 @@ def main():
             fail("invalid_input", "busy-timeout must be 1..10000 ms")
         if hasattr(args, "lease_seconds") and not 1 <= args.lease_seconds <= 86400:
             fail("invalid_input", "lease-seconds must be 1..86400")
-        if args.command == "events" and (args.after < 0 or not 1 <= args.limit <= 10000):
-            fail("invalid_input", "events requires nonnegative --after and --limit 1..10000")
+        if args.command == "events" and (
+            args.after < 0 or not 1 <= args.limit <= 10000
+        ):
+            fail(
+                "invalid_input",
+                "events requires nonnegative --after and --limit 1..10000",
+            )
         store = Store(args)
         result = {"ok": True, "error": None, **store.run()}
         code = 0
@@ -751,7 +1224,10 @@ def main():
     if "--json" in sys.argv:
         print(encoded(result))
     else:
-        print(human_output(result, args.command if args else None), file=sys.stdout if result["ok"] else sys.stderr)
+        print(
+            human_output(result, args.command if args else None),
+            file=sys.stdout if result["ok"] else sys.stderr,
+        )
     return code
 
 
