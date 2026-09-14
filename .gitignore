@@ -19,3 +19,6 @@ Thumbs.db
 .idea/
 *.suo
 *.ntvs*
+
+# python tools
+.ruff_cache/

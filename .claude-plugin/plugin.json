@@ -1,6 +1,6 @@
 {
   "name": "dibs",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Coordinate multiple local coding agents sharing one workspace: dependency-aware tasks, expiring ownership leases, file/resource reservations, and an auditable SQLite state store.",
   "author": { "name": "Brendan Lackey", "url": "https://github.com/MisterChief95" },
   "homepage": "https://github.com/MisterChief95/dibs",

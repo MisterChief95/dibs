@@ -1,5 +1,5 @@
 ---
-mode: agent
+agent: agent
 description: Show the dibs audit log, optionally for one task
 ---
 Task ID (optional): ${input:taskId:Leave blank for the full log}

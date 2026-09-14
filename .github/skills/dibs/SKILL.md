@@ -1,5 +1,5 @@
 ---
-name: coordinator
+name: dibs
 description: Coordinate multiple local agents sharing one workspace with dependency-aware tasks, expiring ownership leases, path or resource reservations, handoffs, and an auditable SQLite state store. Use when parallel workers need to avoid overlapping edits and transfer work safely; do not use merely to spawn agents or manage remote jobs.
 ---
 
