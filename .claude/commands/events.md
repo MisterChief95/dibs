@@ -6,7 +6,7 @@ argument-hint: [TASK-ID]
 Run:
 
 ```bash
-python ".github/skills/dibs/scripts/dibs.py" events --workspace "." --json --limit 50
+python "${CLAUDE_PLUGIN_ROOT}/skills/dibs/scripts/dibs.py" events --workspace "." --json --limit 50
 ```
 
 If an argument was given (`$ARGUMENTS`), it is a task ID — add `--task $ARGUMENTS` to the command above to scope the log to that task.

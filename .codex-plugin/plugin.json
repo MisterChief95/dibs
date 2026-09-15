@@ -7,7 +7,7 @@
   "repository": "https://github.com/MisterChief95/dibs",
   "license": "MIT",
   "keywords": ["multi-agent", "coordination", "tasks", "file-locking"],
-  "skills": "./.github/skills",
+  "skills": "./skills",
   "interface": {
     "displayName": "Dibs",
     "shortDescription": "Coordinate coding agents in a shared workspace.",

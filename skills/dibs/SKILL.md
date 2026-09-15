@@ -7,10 +7,10 @@ description: Coordinate multiple local agents sharing one workspace with depende
 
 Use `scripts/dibs.py` as the shared source of truth while multiple agents work in the same local workspace. The script records coordination state; it does not launch, stop, or message agents.
 
-Resolve the script path relative to this `SKILL.md`. `--workspace` is required (the project being coordinated, never the skill's install location; workspaces and databases inside the skill directory are rejected). Pass the same workspace and database to every worker. Always pass a unique, stable `--actor` because the default Windows username does not distinguish agents. Put common options after the command and prefer `--json` so the complete task state is available:
+Resolve the script path relative to this loaded `SKILL.md`: `scripts/dibs.py` is adjacent to it. Before running a command, substitute its absolute path for `<DIBS_SCRIPT>` below. Never resolve the script from the workspace; the plugin may be installed in a host-managed cache. `--workspace` is required (the project being coordinated, never the skill's install location; workspaces and databases inside the skill directory are rejected). Pass the same workspace and database to every worker. Always pass a unique, stable `--actor` because the default Windows username does not distinguish agents. Put common options after the command and prefer `--json` so the complete task state is available:
 
 ```bash
-python ".github/skills/dibs/scripts/dibs.py" next --workspace "." --actor "agent-1" --json
+python "<DIBS_SCRIPT>" next --workspace "." --actor "agent-1" --json
 ```
 
 Instead of repeating flags, a worker may set `DIBS_WORKSPACE`, `DIBS_DB`, `DIBS_ACTOR`, and `DIBS_TOKEN`; explicit flags override them.
@@ -33,7 +33,7 @@ The default database is `WORKSPACE/.dibs/tasks.sqlite3`. Keep it on a local disk
 Initialize once from the workspace root:
 
 ```bash
-python ".github/skills/dibs/scripts/dibs.py" init --workspace "." --actor "coordinator" --json
+python "<DIBS_SCRIPT>" init --workspace "." --actor "coordinator" --json
 ```
 
 The default journal is WAL. If initialization reports that the bundled SQLite lacks the required WAL fix, retry explicitly with `--journal delete`. Do not choose delete mode preemptively on a supported runtime.
@@ -69,7 +69,7 @@ Tasks record `created` and `updated` timestamps in the database. `list`, `next`,
 2. Claim a specific task, or atomically choose one with `claim-next`, while requesting all known reservations:
 
 ```bash
-python ".github/skills/dibs/scripts/dibs.py" claim TASK-001 --workspace "." --actor "agent-1" --reserve-file "src/helper.py" --resource "git-index" --lease-seconds 600 --json
+python "<DIBS_SCRIPT>" claim TASK-001 --workspace "." --actor "agent-1" --reserve-file "src/helper.py" --resource "git-index" --lease-seconds 600 --json
 ```
 
 3. Retain the returned token (pass `--token` or set `DIBS_TOKEN`).

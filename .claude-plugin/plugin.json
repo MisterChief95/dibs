@@ -7,6 +7,6 @@
   "repository": "https://github.com/MisterChief95/dibs",
   "license": "MIT",
   "keywords": ["multi-agent", "coordination", "tasks", "file-locking"],
-  "skills": "./.github/skills",
+  "skills": "./skills",
   "commands": "./.claude/commands"
 }

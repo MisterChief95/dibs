@@ -16,7 +16,7 @@ Running several coding agents on the same checkout is easy to break: two agents 
 
 ## How it works
 
-`.github/skills/dibs/scripts/dibs.py` is a single dependency-free Python script that is the entire implementation. It's driven by a `SKILL.md` written for LLM agents, describing the coordination contract (claim → heartbeat → reserve/release → handoff → complete/block/cancel/review) and exact command usage. See [.github/skills/dibs/SKILL.md](.github/skills/dibs/SKILL.md) for the full contract.
+`skills/dibs/scripts/dibs.py` is a single dependency-free Python script that is the entire implementation. It's driven by a `SKILL.md` written for LLM agents, describing the coordination contract (claim → heartbeat → reserve/release → handoff → complete/block/cancel/review) and exact command usage. See [skills/dibs/SKILL.md](skills/dibs/SKILL.md) for the full contract.
 
 State lives in a per-workspace SQLite database (default `WORKSPACE/.dibs/tasks.sqlite3`), so each coordinated project gets its own isolated task board.
 
@@ -35,7 +35,7 @@ This installs the coordination skill (so Claude knows the claim/heartbeat/handof
 
 **GitHub Copilot**
 
-Copilot has no cross-repo plugin installer — its instructions are per-repository. Copy [`.github/copilot-instructions.md`](.github/copilot-instructions.md) and [`.github/prompts/`](.github/prompts) into the target repo. VS Code Copilot Chat then exposes `/dibs-list`, `/dibs-show`, `/dibs-next`, and `/dibs-events`, and Copilot gets pointed at the coordination contract automatically.
+Copilot has no cross-repo plugin installer — its instructions are per-repository. Copy [`skills/dibs/`](skills/dibs), [`.github/copilot-instructions.md`](.github/copilot-instructions.md), and [`.github/prompts/`](.github/prompts) into the target repo. VS Code Copilot Chat then exposes `/dibs-list`, `/dibs-show`, `/dibs-next`, and `/dibs-events`, and Copilot gets pointed at the coordination contract automatically.
 
 **Codex**
 
@@ -45,7 +45,7 @@ codex plugin add MisterChief95/dibs
 
 Installs the coordination skill via [`.codex-plugin/plugin.json`](.codex-plugin/plugin.json). Codex doesn't yet get dedicated `/dibs:*` commands here — it reads `SKILL.md` directly when coordination is relevant.
 
-In every case, the actual logic is the one script, [`.github/skills/dibs/scripts/dibs.py`](.github/skills/dibs/scripts/dibs.py) — nothing to build, no server, no third-party dependencies.
+In every case, the actual logic is the one script, [`skills/dibs/scripts/dibs.py`](skills/dibs/scripts/dibs.py) — nothing to build, no server, no third-party dependencies.
 
 ## Use cases
 
@@ -61,7 +61,7 @@ In every case, the actual logic is the one script, [`.github/skills/dibs/scripts
 3. While working: `heartbeat` to renew the lease, `reserve`/`release` to adjust scope, `note` for progress updates, `handoff` to record context without releasing ownership.
 4. To finish: `review`, `complete`, `block`, or `cancel` — each releases the lease and any remaining reservations.
 
-Full command reference, conflict handling, and exit codes are documented in [SKILL.md](.github/skills/dibs/SKILL.md).
+Full command reference, conflict handling, and exit codes are documented in [SKILL.md](skills/dibs/SKILL.md).
 
 ## Task metadata and filtering
 
