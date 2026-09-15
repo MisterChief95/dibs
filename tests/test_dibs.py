@@ -9,7 +9,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
-SCRIPT = Path(__file__).parents[1] / ".github/skills/dibs/scripts/dibs.py"
+SCRIPT = Path(__file__).parents[1] / "skills/dibs/scripts/dibs.py"
+ROOT = Path(__file__).parents[1]
 
 
 class TaskMetadataTest(unittest.TestCase):
@@ -100,6 +101,19 @@ class TaskMetadataTest(unittest.TestCase):
             self.assertTrue(db.execute(
                 "SELECT 1 FROM pragma_table_info('tasks') WHERE name='task_type'"
             ).fetchone())
+
+
+class DistributionPathTest(unittest.TestCase):
+    def test_plugin_instructions_do_not_use_workspace_relative_script_paths(self):
+        skill = (ROOT / "skills/dibs/SKILL.md").read_text(encoding="utf-8")
+        self.assertIn('python "<DIBS_SCRIPT>"', skill)
+        self.assertNotIn('python ".github/skills/dibs/scripts/dibs.py"', skill)
+
+        command_dir = ROOT / ".claude/commands"
+        expected = '${CLAUDE_PLUGIN_ROOT}/skills/dibs/scripts/dibs.py'
+        for command in ("events.md", "list.md", "next.md", "show.md"):
+            content = (command_dir / command).read_text(encoding="utf-8")
+            self.assertIn(expected, content)
 
 
 if __name__ == "__main__":
