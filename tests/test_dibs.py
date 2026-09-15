@@ -115,6 +115,18 @@ class DistributionPathTest(unittest.TestCase):
             content = (command_dir / command).read_text(encoding="utf-8")
             self.assertIn(expected, content)
 
+    def test_plugin_versions_match_marketplace_version(self):
+        paths = (
+            ROOT / ".claude-plugin/plugin.json",
+            ROOT / ".claude-plugin/marketplace.json",
+            ROOT / ".codex-plugin/plugin.json",
+        )
+        claude_plugin, marketplace, codex_plugin = (
+            json.loads(path.read_text(encoding="utf-8")) for path in paths
+        )
+        self.assertEqual(claude_plugin["version"], marketplace["plugins"][0]["version"])
+        self.assertEqual(claude_plugin["version"], codex_plugin["version"])
+
 
 if __name__ == "__main__":
     unittest.main()
