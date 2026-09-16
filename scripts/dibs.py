@@ -21,6 +21,10 @@ is_reserved = getattr(
     os.path, "isreserved", lambda part: PureWindowsPath(part).is_reserved()
 )
 STATUSES = ("todo", "in_progress", "blocked", "review", "done", "cancelled")
+LIST_FIELDS = (
+    "id", "priority", "status", "ready", "owner", "created", "updated", "title",
+    "type", "tags", "work-time",
+)
 REQUIRED_SPEC_KEYS = {
     "id",
     "title",
@@ -139,6 +143,17 @@ def parse_timestamp(value):
         raise argparse.ArgumentTypeError(
             "use an ISO-8601 timestamp, e.g. 2026-09-14T12:00:00Z"
         )
+
+
+def parse_list_fields(value):
+    fields = value.split(",")
+    if not fields or any(field not in LIST_FIELDS for field in fields):
+        raise argparse.ArgumentTypeError(
+            "fields must be comma-separated: " + ", ".join(LIST_FIELDS)
+        )
+    if len(set(fields)) != len(fields):
+        raise argparse.ArgumentTypeError("fields must not repeat")
+    return fields
 
 
 def validate_spec(spec):
@@ -414,6 +429,40 @@ class Store:
             values.append(tag)
         where = " WHERE " + " AND ".join(clauses) if clauses else ""
         return self.db.execute("SELECT * FROM tasks" + where, values).fetchall()
+
+    def work_times(self, rows):
+        """Return seconds between ownership start and end events for each task."""
+        if not rows:
+            return {}
+        task_rows = {row["id"]: row for row in rows}
+        marks = ",".join("?" for _ in task_rows)
+        events = self.db.execute(
+            f"SELECT task_id,type,data,timestamp FROM events WHERE task_id IN ({marks}) "
+            "ORDER BY sequence",
+            tuple(task_rows),
+        )
+        totals, active = {task: 0.0 for task in task_rows}, {}
+        starts = {"claim", "resume", "reclaim"}
+        ends = {"abandoned", "block", "review", "complete", "cancel"}
+        for event in events:
+            task, moment = event["task_id"], event["timestamp"]
+            if event["type"] in starts:
+                if task in active:
+                    totals[task] += moment - active[task]
+                active[task] = moment
+            elif event["type"] in ends:
+                if task in active:
+                    totals[task] += moment - active.pop(task)
+            elif event["type"] == "heartbeat" and json.loads(event["data"]).get(
+                "recovered"
+            ):
+                active[task] = moment
+        now = time.time()
+        for task, started in active.items():
+            row = task_rows[task]
+            if row["token"]:
+                totals[task] += max(0, min(now, row["expires"]) - started)
+        return totals
 
     def import_tasks(self):
         payload = read_json(self.args.file)
@@ -827,13 +876,18 @@ class Store:
             )
             return {"events": [dict(r) | {"data": json.loads(r["data"])} for r in rows]}
         tasks = []
-        for row in sorted(self.task_rows(), key=task_order):
+        rows = sorted(self.task_rows(), key=task_order)
+        fields = getattr(args, "fields", None)
+        work_times = self.work_times(rows) if fields and "work-time" in fields else {}
+        for row in rows:
             detail = self.detail(row["id"])
             detail["ready"] = (
                 row["status"] == "todo" and not row["token"] and self.ready(row)
             )
             if args.command == "next" and not detail["ready"]:
                 continue
+            if work_times:
+                detail["work_time"] = work_times[row["id"]]
             tasks.append(detail)
         if args.command == "export":
             return {
@@ -1053,6 +1107,13 @@ Exit codes: 0 success | 1 internal | 2 conflict | 3 invalid input | 4 storage | 
                 choices=STATUSES,
                 help="Filter: " + ", ".join(STATUSES),
             )
+        if name == "list":
+            options.add_argument(
+                "--fields",
+                type=parse_list_fields,
+                metavar="FIELD,...",
+                help="Human table columns: " + ", ".join(LIST_FIELDS),
+            )
         if name in ("list", "next", "claim-next", "export"):
             options.add_argument(
                 "--type",
@@ -1225,7 +1286,7 @@ Exit codes: 0 success | 1 internal | 2 conflict | 3 invalid input | 4 storage | 
     return p
 
 
-def human_output(result, command):
+def human_output(result, command, fields=None):
     """Small text views for inspection; --json retains the complete API response."""
 
     def one_line(value):
@@ -1236,6 +1297,11 @@ def human_output(result, command):
             "%Y-%m-%d %H:%M:%S UTC"
         )
 
+    def duration(value):
+        hours, remainder = divmod(round(max(0, value)), 3600)
+        minutes, seconds = divmod(remainder, 60)
+        return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
     if not result["ok"]:
         error = result["error"]
         return f"Error ({error['code']}): {error['message']}"
@@ -1245,19 +1311,25 @@ def human_output(result, command):
         tasks = result["tasks"]
         if not tasks:
             return "No ready tasks." if command == "next" else "No matching tasks."
-        rows = [
-            [
-                t["id"],
-                t["priority"],
-                t["status"],
-                "yes" if t.get("ready") else "-",
-                one_line(t["owner"] or "-"),
-                timestamp(t["updated"])[:10],
-                one_line(t["spec"]["title"]),
-            ]
-            for t in tasks
-        ]
-        headers = ["TASK", "PRI", "STATUS", "READY", "OWNER", "UPDATED", "TITLE"]
+        fields = fields or ["id", "priority", "status", "ready", "owner", "updated", "title"]
+        headers = {
+            "id": "TASK", "priority": "PRI", "status": "STATUS", "ready": "READY",
+            "owner": "OWNER", "created": "CREATED", "updated": "UPDATED",
+            "title": "TITLE", "type": "TYPE", "tags": "TAGS", "work-time": "WORK TIME",
+        }
+        def value(task, field):
+            if field == "work-time":
+                return duration(task["work_time"])
+            values = {
+                "id": task["id"], "priority": task["priority"], "status": task["status"],
+                "ready": "yes" if task.get("ready") else "-", "owner": task["owner"] or "-",
+                "created": timestamp(task["created"]), "updated": timestamp(task["updated"]),
+                "title": one_line(task["spec"]["title"]), "type": task["spec"]["type"],
+                "tags": ",".join(task["spec"]["tags"]) or "-",
+            }
+            return one_line(values[field])
+        rows = [[value(task, field) for field in fields] for task in tasks]
+        headers = [headers[field] for field in fields]
         widths = [
             max(len(row[i]) for row in [headers, *rows])
             for i in range(len(headers) - 1)
@@ -1404,7 +1476,9 @@ def main():
         print(encoded(result))
     else:
         print(
-            human_output(result, args.command if args else None),
+            human_output(
+                result, args.command if args else None, getattr(args, "fields", None)
+            ),
             file=sys.stdout if result["ok"] else sys.stderr,
         )
     return code

@@ -40,6 +40,24 @@ class TaskMetadataTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, payload)
         return payload
 
+    def run_text(self, *args):
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPT),
+                *args,
+                "--workspace",
+                str(self.workspace),
+                "--actor",
+                "test",
+            ],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return result.stdout
+
     def test_timestamps_tags_types_and_filters(self):
         self.run_dibs("init", "--journal", "delete")
         plan = self.workspace / "plan.json"
@@ -118,6 +136,53 @@ class TaskMetadataTest(unittest.TestCase):
                     "SELECT 1 FROM pragma_table_info('tasks') WHERE name='task_type'"
                 ).fetchone()
             )
+
+    def test_list_selected_fields_include_timestamps_and_work_time(self):
+        self.run_dibs("init", "--journal", "delete")
+        plan = self.workspace / "plan.json"
+        plan.write_text(
+            json.dumps(
+                {
+                    "tasks": [
+                        {
+                            "id": "TASK-001",
+                            "title": "Measure work",
+                            "priority": "P1",
+                            "depends_on": [],
+                            "work_areas": [],
+                            "description": "Exercise selected list fields.",
+                            "acceptance": ["Output is correct"],
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        self.run_dibs("import", "--file", str(plan))
+        self.assertIn("TASK-001", self.run_text("list"))
+        self.assertIn(
+            "TASK-001", self.run_text("list", "--fields", "id,status,created,updated")
+        )
+        database = self.workspace / ".dibs/tasks.sqlite3"
+        with closing(sqlite3.connect(database)) as db:
+            db.executemany(
+                "INSERT INTO events(task_id,actor,type,data,timestamp) VALUES (?,?,?,?,?)",
+                [
+                    ("TASK-001", "test", "claim", "{}", 1000),
+                    ("TASK-001", "test", "complete", "{}", 1125),
+                ],
+            )
+            db.commit()
+
+        output = self.run_text(
+            "list", "--fields", "id,status,created,updated,work-time,title"
+        )
+        self.assertEqual(
+            output.splitlines()[0].split(),
+            ["TASK", "STATUS", "CREATED", "UPDATED", "WORK", "TIME", "TITLE"],
+        )
+        self.assertIn("00:02:05", output)
+        self.assertIn("Measure work", output)
 
 
 class DistributionPathTest(unittest.TestCase):

@@ -86,6 +86,14 @@ python scripts/dibs.py tag TASK-001 --workspace . --add database
 python scripts/dibs.py list --workspace . --type feature --tag database --updated-after 2026-09-01T00:00:00Z
 ```
 
+Use `--fields` to choose human-readable table columns. Timestamps are shown in
+UTC; `work-time` totals time spent under an active task lease (including the
+currently active lease, capped at expiry):
+
+```bash
+python scripts/dibs.py list --workspace . --fields id,status,created,updated,work-time,title
+```
+
 Existing databases retain their timestamps and upgrade in place when `init` migrates them to schema version 3.
 
 ## For humans: checking status
@@ -94,7 +102,7 @@ You don't need to read raw JSON or learn the CLI to see what's going on. Four re
 
 | Claude Code | Copilot Chat | Codex | Shows |
 |---|---|---|---|
-| `/dibs:list [status]` | `/dibs-list` | `/dibs:list` | All tasks and their status; the CLI also filters by timestamps, type, and tags |
+| `/dibs:list [status] [--fields FIELD,...]` | `/dibs-list` | `/dibs:list` | All tasks and their status; select columns such as timestamps or `work-time`, and filter by timestamps, type, and tags |
 | `/dibs:show <TASK-ID>` | `/dibs-show` | `/dibs:show` | One task's spec, owner/lease, dependencies, and handoff history |
 | `/dibs:next` | `/dibs-next` | `/dibs:next` | Tasks that are ready to claim right now |
 | `/dibs:events [TASK-ID]` | `/dibs-events` | `/dibs:events` | The audit log, optionally scoped to one task |

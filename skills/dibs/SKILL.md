@@ -61,7 +61,7 @@ Import a UTF-8 JSON plan with this shape:
 
 The original seven fields remain required. `type` and `tags` are optional; type defaults to `task`, and tags default to an empty list. Types and tags use lowercase letters, numbers, dots, underscores, and hyphens. IDs match `[A-Z][A-Z0-9]*-<digits>`, priorities are `P0` through `P3`, dependencies must exist, dependency cycles are rejected, list values must be unique nonempty strings, and `acceptance` must not be empty. Import is additive and idempotent for identical existing specs; changing an existing task requires `amend` with optimistic-concurrency arguments.
 
-Tasks record `created` and `updated` timestamps in the database. `list`, `next`, `claim-next`, and `export` accept `--type`, repeatable `--tag` (all supplied tags must match), and inclusive `--created-after`, `--created-before`, `--updated-after`, and `--updated-before` ISO-8601 filters. `list`, `next`, and `export` also accept `--status`.
+Tasks record `created` and `updated` timestamps in the database. `list`, `next`, `claim-next`, and `export` accept `--type`, repeatable `--tag` (all supplied tags must match), and inclusive `--created-after`, `--created-before`, `--updated-after`, and `--updated-before` ISO-8601 filters. `list`, `next`, and `export` also accept `--status`. For human output, `list --fields id,status,created,updated,work-time,title` selects columns; `work-time` is total active lease time, capped at lease expiry.
 
 ## Worker lifecycle
 
