@@ -159,6 +159,10 @@ class TaskMetadataTest(unittest.TestCase):
             encoding="utf-8",
         )
         self.run_dibs("import", "--file", str(plan))
+        self.assertIn("TASK-001", self.run_text("list"))
+        self.assertIn(
+            "TASK-001", self.run_text("list", "--fields", "id,status,created,updated")
+        )
         database = self.workspace / ".dibs/tasks.sqlite3"
         with closing(sqlite3.connect(database)) as db:
             db.executemany(

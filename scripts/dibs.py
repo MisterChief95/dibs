@@ -1318,13 +1318,14 @@ def human_output(result, command, fields=None):
             "title": "TITLE", "type": "TYPE", "tags": "TAGS", "work-time": "WORK TIME",
         }
         def value(task, field):
+            if field == "work-time":
+                return duration(task["work_time"])
             values = {
                 "id": task["id"], "priority": task["priority"], "status": task["status"],
                 "ready": "yes" if task.get("ready") else "-", "owner": task["owner"] or "-",
                 "created": timestamp(task["created"]), "updated": timestamp(task["updated"]),
                 "title": one_line(task["spec"]["title"]), "type": task["spec"]["type"],
                 "tags": ",".join(task["spec"]["tags"]) or "-",
-                "work-time": duration(task["work_time"]),
             }
             return one_line(values[field])
         rows = [[value(task, field) for field in fields] for task in tasks]
