@@ -16,7 +16,7 @@ Running several coding agents on the same checkout is easy to break: two agents 
 
 ## How it works
 
-`skills/dibs/scripts/dibs.py` is a single dependency-free Python script that is the entire implementation. It's driven by a `SKILL.md` written for LLM agents, describing the coordination contract (claim → heartbeat → reserve/release → handoff → complete/block/cancel/review) and exact command usage. See [skills/dibs/SKILL.md](skills/dibs/SKILL.md) for the full contract.
+`scripts/dibs.py` is a single dependency-free Python script that is the entire implementation. It's driven by a `SKILL.md` written for LLM agents, describing the coordination contract (claim → heartbeat → reserve/release → handoff → complete/block/cancel/review) and exact command usage. See [skills/dibs/SKILL.md](skills/dibs/SKILL.md) for the full contract.
 
 State lives in a per-workspace SQLite database (default `WORKSPACE/.dibs/tasks.sqlite3`), so each coordinated project gets its own isolated task board.
 
@@ -35,7 +35,7 @@ This installs the coordination skill (so Claude knows the claim/heartbeat/handof
 
 **GitHub Copilot**
 
-Copilot has no cross-repo plugin installer — its instructions are per-repository. Copy [`skills/dibs/`](skills/dibs), [`.github/copilot-instructions.md`](.github/copilot-instructions.md), and [`.github/prompts/`](.github/prompts) into the target repo. VS Code Copilot Chat then exposes `/dibs-list`, `/dibs-show`, `/dibs-next`, and `/dibs-events`, and Copilot gets pointed at the coordination contract automatically.
+Copilot has no cross-repo plugin installer — its instructions are per-repository. Copy [`scripts/`](scripts), [`skills/dibs/`](skills/dibs), [`.github/copilot-instructions.md`](.github/copilot-instructions.md), and [`.github/prompts/`](.github/prompts) into the target repo. VS Code Copilot Chat then exposes `/dibs-list`, `/dibs-show`, `/dibs-next`, and `/dibs-events`, and Copilot gets pointed at the coordination contract automatically.
 
 **Codex**
 
@@ -43,9 +43,9 @@ Copilot has no cross-repo plugin installer — its instructions are per-reposito
 codex plugin add MisterChief95/dibs
 ```
 
-Installs the coordination skill via [`.codex-plugin/plugin.json`](.codex-plugin/plugin.json). Codex doesn't yet get dedicated `/dibs:*` commands here — it reads `SKILL.md` directly when coordination is relevant.
+Installs the coordination skill and explicit-only `/dibs:list`, `/dibs:show`, `/dibs:next`, and `/dibs:events` skills via [`.codex-plugin/plugin.json`](.codex-plugin/plugin.json).
 
-In every case, the actual logic is the one script, [`skills/dibs/scripts/dibs.py`](skills/dibs/scripts/dibs.py) — nothing to build, no server, no third-party dependencies.
+In every case, the actual logic is the one script, [`scripts/dibs.py`](scripts/dibs.py) — nothing to build, no server, no third-party dependencies.
 
 ## Use cases
 
@@ -77,13 +77,13 @@ Tasks record `created` and `updated` timestamps and may include a lowercase `typ
 Tags are ephemeral board metadata. Anyone can add or remove them without claiming the task or changing its revision; the change still refreshes `updated` and records an audit event:
 
 ```bash
-python .github/skills/dibs/scripts/dibs.py tag TASK-001 --workspace . --add database
+python scripts/dibs.py tag TASK-001 --workspace . --add database
 ```
 
 `list`, `next`, `claim-next`, and `export` can filter by `--type`, repeatable `--tag`, and inclusive ISO-8601 timestamp ranges:
 
 ```bash
-python .github/skills/dibs/scripts/dibs.py list --workspace . --type feature --tag database --updated-after 2026-09-01T00:00:00Z
+python scripts/dibs.py list --workspace . --type feature --tag database --updated-after 2026-09-01T00:00:00Z
 ```
 
 Existing databases retain their timestamps and upgrade in place when `init` migrates them to schema version 3.
@@ -92,12 +92,12 @@ Existing databases retain their timestamps and upgrade in place when `init` migr
 
 You don't need to read raw JSON or learn the CLI to see what's going on. Four read-only commands are available (see Installation above for how each assistant exposes them):
 
-| Claude Code | Copilot Chat | Shows |
-|---|---|---|
-| `/dibs:list [status]` | `/dibs-list` | All tasks and their status; the CLI also filters by timestamps, type, and tags |
-| `/dibs:show <TASK-ID>` | `/dibs-show` | One task's spec, owner/lease, dependencies, and handoff history |
-| `/dibs:next` | `/dibs-next` | Tasks that are ready to claim right now |
-| `/dibs:events [TASK-ID]` | `/dibs-events` | The audit log, optionally scoped to one task |
+| Claude Code | Copilot Chat | Codex | Shows |
+|---|---|---|---|
+| `/dibs:list [status]` | `/dibs-list` | `/dibs:list` | All tasks and their status; the CLI also filters by timestamps, type, and tags |
+| `/dibs:show <TASK-ID>` | `/dibs-show` | `/dibs:show` | One task's spec, owner/lease, dependencies, and handoff history |
+| `/dibs:next` | `/dibs-next` | `/dibs:next` | Tasks that are ready to claim right now |
+| `/dibs:events [TASK-ID]` | `/dibs-events` | `/dibs:events` | The audit log, optionally scoped to one task |
 
 These only read the database — they can't claim, block, or complete work, so they're safe to run at any time without affecting running agents.
 

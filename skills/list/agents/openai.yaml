@@ -1,0 +1,5 @@
+interface:
+  display_name: "List tasks"
+  short_description: "List Dibs tasks and their status."
+policy:
+  allow_implicit_invocation: false
