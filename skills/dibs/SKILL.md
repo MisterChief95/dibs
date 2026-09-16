@@ -7,7 +7,7 @@ description: Coordinate multiple local agents sharing one workspace with depende
 
 Use `scripts/dibs.py` as the shared source of truth while multiple agents work in the same local workspace. The script records coordination state; it does not launch, stop, or message agents.
 
-Resolve the script path relative to this loaded `SKILL.md`: `scripts/dibs.py` is adjacent to it. Before running a command, substitute its absolute path for `<DIBS_SCRIPT>` below. Never resolve the script from the workspace; the plugin may be installed in a host-managed cache. `--workspace` is required (the project being coordinated, never the skill's install location; workspaces and databases inside the skill directory are rejected). Pass the same workspace and database to every worker. Always pass a unique, stable `--actor` because the default Windows username does not distinguish agents. Put common options after the command and prefer `--json` so the complete task state is available:
+Resolve the script path relative to this loaded `SKILL.md`: `../../scripts/dibs.py`. Before running a command, substitute its absolute path for `<DIBS_SCRIPT>` below. Never resolve the script from the workspace; the plugin may be installed in a host-managed cache. `--workspace` is required (the project being coordinated, never the skill's install location; workspaces and databases inside the skill directory are rejected). Pass the same workspace and database to every worker. Always pass a unique, stable `--actor` because the default Windows username does not distinguish agents. Put common options after the command and prefer `--json` so the complete task state is available:
 
 ```bash
 python "<DIBS_SCRIPT>" next --workspace "." --actor "agent-1" --json

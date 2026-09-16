@@ -8,8 +8,7 @@ from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 
-
-SCRIPT = Path(__file__).parents[1] / "skills/dibs/scripts/dibs.py"
+SCRIPT = Path(__file__).parents[1] / "scripts/dibs.py"
 ROOT = Path(__file__).parents[1]
 
 
@@ -23,7 +22,16 @@ class TaskMetadataTest(unittest.TestCase):
 
     def run_dibs(self, *args):
         result = subprocess.run(
-            [sys.executable, str(SCRIPT), *args, "--workspace", str(self.workspace), "--actor", "test", "--json"],
+            [
+                sys.executable,
+                str(SCRIPT),
+                *args,
+                "--workspace",
+                str(self.workspace),
+                "--actor",
+                "test",
+                "--json",
+            ],
             text=True,
             capture_output=True,
             check=False,
@@ -36,28 +44,32 @@ class TaskMetadataTest(unittest.TestCase):
         self.run_dibs("init", "--journal", "delete")
         plan = self.workspace / "plan.json"
         plan.write_text(
-            json.dumps({"tasks": [
+            json.dumps(
                 {
-                    "id": "TASK-001",
-                    "title": "Add metadata",
-                    "priority": "P1",
-                    "depends_on": [],
-                    "work_areas": [],
-                    "description": "Exercise metadata.",
-                    "acceptance": ["Test passes"],
-                    "type": "feature",
-                    "tags": ["database", "audit"],
-                },
-                {
-                    "id": "TASK-002",
-                    "title": "Legacy task",
-                    "priority": "P2",
-                    "depends_on": [],
-                    "work_areas": [],
-                    "description": "Keep the old input shape valid.",
-                    "acceptance": ["Import succeeds"],
-                },
-            ]}),
+                    "tasks": [
+                        {
+                            "id": "TASK-001",
+                            "title": "Add metadata",
+                            "priority": "P1",
+                            "depends_on": [],
+                            "work_areas": [],
+                            "description": "Exercise metadata.",
+                            "acceptance": ["Test passes"],
+                            "type": "feature",
+                            "tags": ["database", "audit"],
+                        },
+                        {
+                            "id": "TASK-002",
+                            "title": "Legacy task",
+                            "priority": "P2",
+                            "depends_on": [],
+                            "work_areas": [],
+                            "description": "Keep the old input shape valid.",
+                            "acceptance": ["Import succeeds"],
+                        },
+                    ]
+                }
+            ),
             encoding="utf-8",
         )
         self.run_dibs("import", "--file", str(plan))
@@ -75,9 +87,7 @@ class TaskMetadataTest(unittest.TestCase):
         )["tasks"]
         self.assertEqual([item["id"] for item in tasks], ["TASK-001"])
 
-        tagged = self.run_dibs(
-            "tag", "TASK-001", "--add", "sqlite"
-        )["task"]
+        tagged = self.run_dibs("tag", "TASK-001", "--add", "sqlite")["task"]
         self.assertEqual(tagged["spec"]["tags"], ["audit", "database", "sqlite"])
         self.assertEqual(tagged["revision"], 0)
         self.assertGreaterEqual(tagged["updated"], task["updated"])
@@ -86,7 +96,12 @@ class TaskMetadataTest(unittest.TestCase):
         self.run_dibs("init", "--journal", "delete")
         database = self.workspace / ".dibs/tasks.sqlite3"
         with closing(sqlite3.connect(database)) as db:
-            for index in ("tasks_created", "tasks_updated", "tasks_type", "task_tags_tag"):
+            for index in (
+                "tasks_created",
+                "tasks_updated",
+                "tasks_type",
+                "task_tags_tag",
+            ):
                 db.execute(f"DROP INDEX {index}")
             db.execute("DROP TABLE task_tags")
             db.execute("ALTER TABLE tasks DROP COLUMN task_type")
@@ -98,9 +113,11 @@ class TaskMetadataTest(unittest.TestCase):
         self.assertEqual(result["schema_version"], 3)
         with closing(sqlite3.connect(database)) as db:
             self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 3)
-            self.assertTrue(db.execute(
-                "SELECT 1 FROM pragma_table_info('tasks') WHERE name='task_type'"
-            ).fetchone())
+            self.assertTrue(
+                db.execute(
+                    "SELECT 1 FROM pragma_table_info('tasks') WHERE name='task_type'"
+                ).fetchone()
+            )
 
 
 class DistributionPathTest(unittest.TestCase):
@@ -110,10 +127,24 @@ class DistributionPathTest(unittest.TestCase):
         self.assertNotIn('python ".github/skills/dibs/scripts/dibs.py"', skill)
 
         command_dir = ROOT / ".claude/commands"
-        expected = '${CLAUDE_PLUGIN_ROOT}/skills/dibs/scripts/dibs.py'
+        expected = "${CLAUDE_PLUGIN_ROOT}/scripts/dibs.py"
         for command in ("events.md", "list.md", "next.md", "show.md"):
             content = (command_dir / command).read_text(encoding="utf-8")
             self.assertIn(expected, content)
+
+        claude_plugin = json.loads(
+            (ROOT / ".claude-plugin/plugin.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(claude_plugin["skills"], ["./skills/dibs"])
+
+    def test_codex_read_only_commands_are_explicit_skills(self):
+        for command in ("events", "list", "next", "show"):
+            skill_dir = ROOT / "skills" / command
+            skill = (skill_dir / "SKILL.md").read_text(encoding="utf-8")
+            metadata = (skill_dir / "agents/openai.yaml").read_text(encoding="utf-8")
+            self.assertIn(f"name: {command}", skill)
+            self.assertIn("../../scripts/dibs.py", skill)
+            self.assertIn("allow_implicit_invocation: false", metadata)
 
     def test_plugin_versions_match_marketplace_version(self):
         paths = (

@@ -122,7 +122,10 @@ def nonempty(value, name):
 def label(value, name):
     nonempty(value, name)
     if not re.fullmatch(r"[a-z0-9][a-z0-9_.-]*", value):
-        fail("invalid_input", f"{name} must use lowercase letters, numbers, dot, underscore, or hyphen")
+        fail(
+            "invalid_input",
+            f"{name} must use lowercase letters, numbers, dot, underscore, or hyphen",
+        )
     return value
 
 
@@ -133,16 +136,24 @@ def parse_timestamp(value):
             parsed = parsed.replace(tzinfo=timezone.utc)
         return parsed.timestamp()
     except (ValueError, OverflowError):
-        raise argparse.ArgumentTypeError("use an ISO-8601 timestamp, e.g. 2026-09-14T12:00:00Z")
+        raise argparse.ArgumentTypeError(
+            "use an ISO-8601 timestamp, e.g. 2026-09-14T12:00:00Z"
+        )
 
 
 def validate_spec(spec):
     keys = set(spec) if isinstance(spec, dict) else set()
-    if not isinstance(spec, dict) or not REQUIRED_SPEC_KEYS <= keys or keys - REQUIRED_SPEC_KEYS - OPTIONAL_SPEC_KEYS:
+    if (
+        not isinstance(spec, dict)
+        or not REQUIRED_SPEC_KEYS <= keys
+        or keys - REQUIRED_SPEC_KEYS - OPTIONAL_SPEC_KEYS
+    ):
         fail(
             "invalid_input",
-            "Task requires fields: " + ", ".join(sorted(REQUIRED_SPEC_KEYS))
-            + "; optional: " + ", ".join(sorted(OPTIONAL_SPEC_KEYS)),
+            "Task requires fields: "
+            + ", ".join(sorted(REQUIRED_SPEC_KEYS))
+            + "; optional: "
+            + ", ".join(sorted(OPTIONAL_SPEC_KEYS)),
         )
     for field in ("id", "title", "description"):
         nonempty(spec[field], field)
@@ -428,7 +439,14 @@ class Store:
             self.db.execute(
                 """INSERT INTO tasks(id,spec,priority,created,updated,task_type)
                 VALUES (?,?,?,?,?,?)""",
-                (task, encoded(spec), spec["priority"], now, now, spec.get("type", "task")),
+                (
+                    task,
+                    encoded(spec),
+                    spec["priority"],
+                    now,
+                    now,
+                    spec.get("type", "task"),
+                ),
             )
             self.replace_tags(task, spec.get("tags", []))
         for task in added:
@@ -753,7 +771,13 @@ class Store:
         self.db.execute(
             """UPDATE tasks SET spec=?,priority=?,task_type=?,revision=revision+1,updated=?
             WHERE id=?""",
-            (encoded(spec), spec["priority"], spec.get("type", "task"), time.time(), args.task),
+            (
+                encoded(spec),
+                spec["priority"],
+                spec.get("type", "task"),
+                time.time(),
+                args.task,
+            ),
         )
         self.replace_tags(args.task, spec.get("tags", []))
         self.db.execute("DELETE FROM dependencies WHERE task_id=?", (args.task,))
@@ -1357,7 +1381,7 @@ def main():
         store = Store(args)
         result = {"ok": True, "error": None, **store.run()}
         code = 0
-    except Exception as error:
+    except Exception as error:  # noqa: BLE001  # CLI boundary returns structured errors.
         message = str(error)
         if isinstance(error, DibsError):
             kind = error.code

@@ -1,0 +1,5 @@
+interface:
+  display_name: "Task events"
+  short_description: "Show the Dibs audit log."
+policy:
+  allow_implicit_invocation: false

@@ -1,0 +1,5 @@
+interface:
+  display_name: "Next task"
+  short_description: "List Dibs tasks ready to claim."
+policy:
+  allow_implicit_invocation: false

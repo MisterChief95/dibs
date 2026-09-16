@@ -1,0 +1,5 @@
+interface:
+  display_name: "Show task"
+  short_description: "Show a Dibs task and its history."
+policy:
+  allow_implicit_invocation: false
