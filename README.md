@@ -123,6 +123,6 @@ These only read the database — they can't claim, block, or complete work, so t
 
 ## Requirements
 
-Python 3, standard library only — no third-party packages, no server process. Works from any local disk path; network paths are rejected.
+Python 3.9+, standard library only (including `sqlite3`) — no third-party packages, no server process. Works from any local disk path; network paths are rejected.
 
 Maintained by [Brendan Lackey](https://github.com/MisterChief95). Project source and documentation are hosted at [MisterChief95/dibs](https://github.com/MisterChief95/dibs).

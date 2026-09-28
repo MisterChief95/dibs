@@ -13,6 +13,9 @@ from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path, PureWindowsPath
 
+if sys.version_info < (3, 9):
+    sys.exit("dibs requires Python 3.9 or newer")
+
 VERSION = 3
 EXIT = {"internal": 1, "conflict": 2, "invalid_input": 3, "storage": 4, "not_found": 5}
 SKILL_DIR = Path(__file__).resolve().parents[1]

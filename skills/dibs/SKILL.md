@@ -17,13 +17,22 @@ Instead of repeating flags, a worker may set `DIBS_WORKSPACE`, `DIBS_DB`, `DIBS_
 
 The default database is `WORKSPACE/.dibs/tasks.sqlite3`. Keep it on a local disk; network paths are rejected. If using a nondefault `--db`, use that same path for every command.
 
+## Python check
+
+Dibs needs Python 3.9+ with its standard `sqlite3` module; nothing else is installed. Before the first command in a session, find a working interpreter by trying `python`, then `py -3` (Windows), then `python3` (macOS/Linux):
+
+```bash
+python -c "import sys, sqlite3; print(sys.version.split()[0], sqlite3.sqlite_version)"
+```
+
+Use whichever launcher succeeds in place of `python` for every dibs command. On Windows, `python` may open a Microsoft Store stub instead of running; treat that as missing. If no launcher works, or the version is below 3.9, stop and ask the user to install Python 3.9 or newer (for example `winget install Python.Python.3.12`, `brew install python`, or the distro's `python3` package). Do not install it yourself.
+
 ## Shell notes
 
 - **Pass JSON by file.** Write handoff, import, and amend JSON with your file-writing tool, then pass `--file PATH`. Avoid inline JSON and `echo ... | --file -`: PowerShell 5.1 strips embedded quotes from native arguments and pipes stdin in a legacy encoding, and `cmd.exe` quoting differs again. If you must pipe, use a single-quoted here-string in PowerShell (`@'...'@`) or a quoted heredoc in bash (`<<'EOF'`).
 - **Don't rely on environment variables persisting.** Many agent harnesses start a fresh shell per command, so `DIBS_*` variables and the token set in one call are gone in the next. Pass `--workspace`, `--actor`, and `--token` explicitly. If your shell does persist, the syntax is `export DIBS_ACTOR=agent-1` (bash/zsh), `$env:DIBS_ACTOR = "agent-1"` (PowerShell), or `set DIBS_ACTOR=agent-1` (cmd).
 - **Use `--json` output for parsing.** It is ASCII-escaped, so it is safe under any console code page. In PowerShell, parse it with `ConvertFrom-Json`; in bash, use `jq` or `python -c`.
 - **Human-readable output is UTF-8.** PowerShell (5.1 and 7) decodes native output with `[Console]::OutputEncoding`, often a legacy code page, so non-ASCII text such as emoji can look garbled. Run `[Console]::OutputEncoding = [Text.UTF8Encoding]::new()` once in the session to fix it.
-- **Python launcher.** If `python` is missing or opens the Microsoft Store stub, try `py -3` (Windows) or `python3` (macOS/Linux).
 - **Paths.** Forward slashes work on every platform. Quote any path that contains spaces.
 - **Saving `report` output.** In PowerShell 5.1, `>` writes UTF-16. Set the console encoding above, then use `... | Out-File -Encoding utf8 report.md` instead.
 
