@@ -32,7 +32,7 @@ class TaskMetadataTest(unittest.TestCase):
                 "test",
                 "--json",
             ],
-            text=True,
+            encoding="utf-8",
             capture_output=True,
             check=False,
         )
@@ -51,15 +51,43 @@ class TaskMetadataTest(unittest.TestCase):
                 "--actor",
                 "test",
             ],
-            text=True,
+            encoding="utf-8",
             capture_output=True,
             check=False,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         return result.stdout
 
+    def test_init_picks_journal_for_runtime(self):
+        sys.path.insert(0, str(SCRIPT.parent))
+        from dibs import wal_safe
+
+        expected = "wal" if wal_safe(sqlite3.sqlite_version_info) else "delete"
+        self.assertEqual(self.run_dibs("init")["journal"], expected)
+
+    def test_non_ascii_text_survives_any_output_encoding(self):
+        self.run_dibs("init")
+        plan = {
+            "tasks": [
+                {
+                    "id": "TASK-001",
+                    "title": "Ship ✓ → 🚀",
+                    "priority": "P1",
+                    "depends_on": [],
+                    "work_areas": [],
+                    "description": "Unicode.",
+                    "acceptance": ["ok"],
+                }
+            ]
+        }
+        (self.workspace / "plan.json").write_text(json.dumps(plan), encoding="utf-8")
+        self.run_dibs("import", "--file", str(self.workspace / "plan.json"))
+        self.assertIn("Ship ✓ → 🚀", self.run_text("report"))
+        task = self.run_dibs("show", "TASK-001")["task"]
+        self.assertEqual(task["spec"]["title"], "Ship ✓ → 🚀")
+
     def test_timestamps_tags_types_and_filters(self):
-        self.run_dibs("init", "--journal", "delete")
+        self.run_dibs("init")
         plan = self.workspace / "plan.json"
         plan.write_text(
             json.dumps(
@@ -111,7 +139,7 @@ class TaskMetadataTest(unittest.TestCase):
         self.assertGreaterEqual(tagged["updated"], task["updated"])
 
     def test_version_two_database_migrates_in_place(self):
-        self.run_dibs("init", "--journal", "delete")
+        self.run_dibs("init")
         database = self.workspace / ".dibs/tasks.sqlite3"
         with closing(sqlite3.connect(database)) as db:
             for index in (
@@ -127,7 +155,7 @@ class TaskMetadataTest(unittest.TestCase):
             db.execute("UPDATE metadata SET value='2' WHERE key='schema_version'")
             db.commit()
 
-        result = self.run_dibs("init", "--journal", "delete")
+        result = self.run_dibs("init")
         self.assertEqual(result["schema_version"], 3)
         with closing(sqlite3.connect(database)) as db:
             self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 3)
@@ -138,7 +166,7 @@ class TaskMetadataTest(unittest.TestCase):
             )
 
     def test_list_selected_fields_include_timestamps_and_work_time(self):
-        self.run_dibs("init", "--journal", "delete")
+        self.run_dibs("init")
         plan = self.workspace / "plan.json"
         plan.write_text(
             json.dumps(
@@ -184,6 +212,65 @@ class TaskMetadataTest(unittest.TestCase):
         self.assertIn("00:02:05", output)
         self.assertIn("Measure work", output)
 
+    def test_report_prints_paste_ready_markdown(self):
+        self.run_dibs("init")
+        plan = self.workspace / "plan.json"
+        plan.write_text(
+            json.dumps(
+                {
+                    "tasks": [
+                        {
+                            "id": f"TASK-00{n}",
+                            "title": f"Story {n}",
+                            "priority": "P1",
+                            "depends_on": [],
+                            "work_areas": [],
+                            "description": "Report this.",
+                            "acceptance": ["Criterion met"],
+                            "tags": ["ui"],
+                        }
+                        for n in (1, 2)
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        self.run_dibs("import", "--file", str(plan))
+        token = self.run_dibs("claim", "TASK-001")["lease_token"]
+        self.run_dibs("note", "TASK-001", "--message", "Found the root cause")
+        handoff = self.workspace / "handoff.json"
+        handoff.write_text(
+            json.dumps(
+                {
+                    "summary": "Shipped the fix",
+                    "changed_files": ["src/app.py"],
+                    "checks": ["unit tests pass"],
+                }
+            ),
+            encoding="utf-8",
+        )
+        self.run_dibs(
+            "complete", "TASK-001", "--token", token, "--ack-quiescent",
+            "--file", str(handoff),
+        )
+
+        output = self.run_text("report", "TASK-001")
+        for expected in (
+            "## TASK-001: Story 1",
+            "**Status:** done",
+            "- [x] Criterion met",
+            "- `src/app.py`",
+            "- unit tests pass",
+            "note: Found the root cause",
+            "complete: Shipped the fix",
+        ):
+            self.assertIn(expected, output)
+        self.assertNotIn("TASK-002", output)
+
+        report = self.run_dibs("report", "--status", "todo", "--tag", "ui")
+        self.assertEqual([task["id"] for task in report["tasks"]], ["TASK-002"])
+        self.assertIn("- [ ] Criterion met", report["markdown"])
+
 
 class DistributionPathTest(unittest.TestCase):
     def test_plugin_instructions_do_not_use_workspace_relative_script_paths(self):
@@ -193,7 +280,7 @@ class DistributionPathTest(unittest.TestCase):
 
         command_dir = ROOT / ".claude/commands"
         expected = "${CLAUDE_PLUGIN_ROOT}/scripts/dibs.py"
-        for command in ("events.md", "list.md", "next.md", "show.md"):
+        for command in ("events.md", "list.md", "next.md", "report.md", "show.md"):
             content = (command_dir / command).read_text(encoding="utf-8")
             self.assertIn(expected, content)
 
@@ -203,7 +290,7 @@ class DistributionPathTest(unittest.TestCase):
         self.assertEqual(claude_plugin["skills"], ["./skills/dibs"])
 
     def test_codex_read_only_commands_are_explicit_skills(self):
-        for command in ("events", "list", "next", "show"):
+        for command in ("events", "list", "next", "report", "show"):
             skill_dir = ROOT / "skills" / command
             skill = (skill_dir / "SKILL.md").read_text(encoding="utf-8")
             metadata = (skill_dir / "agents/openai.yaml").read_text(encoding="utf-8")

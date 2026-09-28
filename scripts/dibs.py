@@ -13,6 +13,9 @@ from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path, PureWindowsPath
 
+if sys.version_info < (3, 9):
+    sys.exit("dibs requires Python 3.9 or newer")
+
 VERSION = 3
 EXIT = {"internal": 1, "conflict": 2, "invalid_input": 3, "storage": 4, "not_found": 5}
 SKILL_DIR = Path(__file__).resolve().parents[1]
@@ -131,6 +134,20 @@ def label(value, name):
             f"{name} must use lowercase letters, numbers, dot, underscore, or hyphen",
         )
     return value
+
+
+def one_line(value):
+    return " ".join(str(value).split())
+
+
+def timestamp(value):
+    return datetime.fromtimestamp(value, timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+
+def duration(value):
+    hours, remainder = divmod(round(max(0, value)), 3600)
+    minutes, seconds = divmod(remainder, 60)
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
 
 
 def parse_timestamp(value):
@@ -303,10 +320,12 @@ class Store:
             if not row or row[0] != str(self.root).casefold():
                 fail("invalid_input", "Database belongs to a different workspace")
         mode = self.args.journal
-        if mode == "wal" and not wal_safe(sqlite3.sqlite_version_info):
+        if mode == "auto":
+            mode = "wal" if wal_safe(sqlite3.sqlite_version_info) else "delete"
+        elif mode == "wal" and not wal_safe(sqlite3.sqlite_version_info):
             fail(
                 "storage",
-                f"SQLite {sqlite3.sqlite_version} lacks the WAL fix. Use init --journal delete explicitly",
+                f"SQLite {sqlite3.sqlite_version} lacks the WAL fix. Use init --journal auto or delete",
             )
         current = self.db.execute(f"PRAGMA journal_mode={mode}").fetchone()[0]
         if current != mode:
@@ -875,6 +894,33 @@ class Store:
                 (args.after, args.task, args.task, args.limit),
             )
             return {"events": [dict(r) | {"data": json.loads(r["data"])} for r in rows]}
+        if args.command == "report":
+            for task in args.tasks:
+                self.row(task)
+            rows = sorted(self.task_rows(), key=task_order)
+            if args.tasks:
+                rows = [row for row in rows if row["id"] in args.tasks]
+            work_times = self.work_times(rows)
+            tasks = []
+            for row in rows:
+                detail = self.detail(row["id"])
+                detail["work_time"] = work_times[row["id"]]
+                detail["activity"] = []
+                for event in self.db.execute(
+                    """SELECT actor,type,data,timestamp FROM events WHERE task_id=?
+                    AND type IN ('note','handoff','block','review','complete','cancel')
+                    ORDER BY sequence""",
+                    (row["id"],),
+                ):
+                    data = json.loads(event["data"])
+                    text = data.get("message") or data.get("summary")
+                    if text:
+                        detail["activity"].append(
+                            {k: event[k] for k in ("actor", "type", "timestamp")}
+                            | {"text": text}
+                        )
+                tasks.append(detail)
+            return {"tasks": tasks, "markdown": report_markdown(tasks)}
         tasks = []
         rows = sorted(self.task_rows(), key=task_order)
         fields = getattr(args, "fields", None)
@@ -928,7 +974,7 @@ class Store:
             except BaseException:
                 target.unlink(missing_ok=True)
                 raise
-        if args.command in ("list", "show", "next", "events", "export"):
+        if args.command in ("list", "show", "next", "events", "export", "report"):
             self.db.execute("BEGIN")
             result = self.read()
             self.db.commit()
@@ -1016,6 +1062,7 @@ def parser():
   %(prog)s next --workspace . --json
   %(prog)s show COMPAT-001 --workspace .
   %(prog)s claim COMPAT-001 --workspace . --actor agent-1 --reserve-tree tests/fixtures
+  %(prog)s report --workspace . --status done --updated-after 2026-09-21T00:00:00Z
 
 Put options after the command. Run COMMAND --help for its arguments.
 Environment defaults: DIBS_WORKSPACE, DIBS_DB, DIBS_ACTOR, DIBS_TOKEN.
@@ -1046,6 +1093,7 @@ Exit codes: 0 success | 1 internal | 2 conflict | 3 invalid input | 4 storage | 
         "tag": "Add or remove task tags without changing task ownership",
         "reclaim": "Take over an expired lease after the old worker stops",
         "export": "Export a readable status and audit snapshot",
+        "report": "Print paste-ready Markdown for tickets, stories, or status updates",
         "backup": "Create a consistent SQLite database backup",
         "events": "Read the append-only audit log",
     }
@@ -1059,23 +1107,33 @@ Exit codes: 0 success | 1 internal | 2 conflict | 3 invalid input | 4 storage | 
             "export",
             "backup",
             "events",
+            "report",
         )
         s = sub.add_parser(
             name,
             parents=[common],
             help=description,
             description=description + ".",
-            usage="%(prog)s" + (" TASK" if has_task else "") + " [options]",
+            usage="%(prog)s"
+            + (" TASK" if has_task else " [TASK ...]" if name == "report" else "")
+            + " [options]",
         )
         if has_task:
             s.add_argument("task", metavar="TASK", help="Task ID, e.g. COMPAT-001")
+        if name == "report":
+            s.add_argument(
+                "tasks",
+                metavar="TASK",
+                nargs="*",
+                help="Task IDs to report (default: every task matching the filters)",
+            )
         options = s.add_argument_group("command options")
         if name == "init":
             options.add_argument(
                 "--journal",
-                choices=("wal", "delete"),
-                default="wal",
-                help="Journal mode (default: wal; use delete for older SQLite)",
+                choices=("auto", "wal", "delete"),
+                default="auto",
+                help="Journal mode (default: auto = wal when this SQLite has the WAL fix, else delete)",
             )
         if name in (
             "import",
@@ -1100,7 +1158,7 @@ Exit codes: 0 success | 1 internal | 2 conflict | 3 invalid input | 4 storage | 
                 help=file_help
                 + (" (required)" if name != "export" else " (default: stdout)"),
             )
-        if name in ("list", "next", "export"):
+        if name in ("list", "next", "export", "report"):
             options.add_argument(
                 "--status",
                 metavar="STATE",
@@ -1114,7 +1172,7 @@ Exit codes: 0 success | 1 internal | 2 conflict | 3 invalid input | 4 storage | 
                 metavar="FIELD,...",
                 help="Human table columns: " + ", ".join(LIST_FIELDS),
             )
-        if name in ("list", "next", "claim-next", "export"):
+        if name in ("list", "next", "claim-next", "export", "report"):
             options.add_argument(
                 "--type",
                 dest="task_type",
@@ -1286,25 +1344,74 @@ Exit codes: 0 success | 1 internal | 2 conflict | 3 invalid input | 4 storage | 
     return p
 
 
+def report_markdown(tasks):
+    """Paste-ready Markdown for tickets, stories, PRs, and status updates."""
+    sections = []
+    for task in tasks:
+        spec = task["spec"]
+        facts = [
+            f"**Status:** {task['status']}",
+            f"**Priority:** {task['priority']}",
+            f"**Type:** {spec['type']}",
+        ]
+        if spec["tags"]:
+            facts.append("**Tags:** " + ", ".join(spec["tags"]))
+        if task["owner"]:
+            facts.append(f"**Owner:** {task['owner']}")
+        if task["work_time"]:
+            facts.append(f"**Work time:** {duration(task['work_time'])}")
+        meta = [
+            f"**Created:** {timestamp(task['created'])}",
+            f"**Updated:** {timestamp(task['updated'])}",
+        ]
+        if spec["depends_on"]:
+            meta.append("**Depends on:** " + ", ".join(spec["depends_on"]))
+        done = task["status"] == "done"
+        lines = [
+            f"## {task['id']}: {one_line(spec['title'])}",
+            "",
+            " · ".join(facts),
+            "",
+            " · ".join(meta),
+            "",
+            "### Description",
+            "",
+            spec["description"].strip(),
+            "",
+            "### Acceptance criteria",
+            "",
+            *[f"- [{'x' if done else ' '}] {item}" for item in spec["acceptance"]],
+        ]
+        handoffs = [handoff["data"] for handoff in task["handoffs"]]
+        latest = handoffs[-1] if handoffs else {}
+        changed = dict.fromkeys(f for data in handoffs for f in data["changed_files"])
+        for title, values in (
+            ("Changed files", [f"`{path}`" for path in changed]),
+            ("Checks", latest.get("checks", [])),
+            ("Blockers", latest.get("blockers", [])),
+            ("Next steps", latest.get("next_steps", [])),
+            (
+                "Activity",
+                [
+                    f"{timestamp(item['timestamp'])} · {item['actor']} · "
+                    f"{item['type']}: {one_line(item['text'])}"
+                    for item in task["activity"]
+                ],
+            ),
+        ):
+            if values:
+                lines += ["", f"### {title}", "", *[f"- {value}" for value in values]]
+        sections.append("\n".join(lines))
+    return "\n\n---\n\n".join(sections)
+
+
 def human_output(result, command, fields=None):
     """Small text views for inspection; --json retains the complete API response."""
-
-    def one_line(value):
-        return " ".join(str(value).split())
-
-    def timestamp(value):
-        return datetime.fromtimestamp(value, timezone.utc).strftime(
-            "%Y-%m-%d %H:%M:%S UTC"
-        )
-
-    def duration(value):
-        hours, remainder = divmod(round(max(0, value)), 3600)
-        minutes, seconds = divmod(remainder, 60)
-        return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
-
     if not result["ok"]:
         error = result["error"]
         return f"Error ({error['code']}): {error['message']}"
+    if command == "report":
+        return result["markdown"] or "No matching tasks."
     if command == "export" and "tasks" in result:
         return json.dumps(result, ensure_ascii=False, indent=2)
     if "tasks" in result:
@@ -1472,8 +1579,12 @@ def main():
     finally:
         if store:
             store.db.close()  # Closing rolls back any failed transaction.
+    # Redirected Windows output defaults to a legacy code page that cannot encode all task text.
+    for stream in (sys.stdout, sys.stderr):
+        stream.reconfigure(encoding="utf-8")
     if "--json" in sys.argv:
-        print(encoded(result))
+        # ASCII escapes survive any shell encoding and decode identically in every JSON parser.
+        print(json.dumps(result, sort_keys=True, separators=(",", ":")))
     else:
         print(
             human_output(

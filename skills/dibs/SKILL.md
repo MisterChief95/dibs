@@ -17,6 +17,25 @@ Instead of repeating flags, a worker may set `DIBS_WORKSPACE`, `DIBS_DB`, `DIBS_
 
 The default database is `WORKSPACE/.dibs/tasks.sqlite3`. Keep it on a local disk; network paths are rejected. If using a nondefault `--db`, use that same path for every command.
 
+## Python check
+
+Dibs needs Python 3.9+ with its standard `sqlite3` module; nothing else is installed. Before the first command in a session, find a working interpreter by trying `python`, then `py -3` (Windows), then `python3` (macOS/Linux):
+
+```bash
+python -c "import sys, sqlite3; print(sys.version.split()[0], sqlite3.sqlite_version)"
+```
+
+Use whichever launcher succeeds in place of `python` for every dibs command. On Windows, `python` may open a Microsoft Store stub instead of running; treat that as missing. If no launcher works, or the version is below 3.9, stop and ask the user to install Python 3.9 or newer (for example `winget install Python.Python.3.12`, `brew install python`, or the distro's `python3` package). Do not install it yourself.
+
+## Shell notes
+
+- **Pass JSON by file.** Write handoff, import, and amend JSON with your file-writing tool, then pass `--file PATH`. Avoid inline JSON and `echo ... | --file -`: PowerShell 5.1 strips embedded quotes from native arguments and pipes stdin in a legacy encoding, and `cmd.exe` quoting differs again. If you must pipe, use a single-quoted here-string in PowerShell (`@'...'@`) or a quoted heredoc in bash (`<<'EOF'`).
+- **Don't rely on environment variables persisting.** Many agent harnesses start a fresh shell per command, so `DIBS_*` variables and the token set in one call are gone in the next. Pass `--workspace`, `--actor`, and `--token` explicitly. If your shell does persist, the syntax is `export DIBS_ACTOR=agent-1` (bash/zsh), `$env:DIBS_ACTOR = "agent-1"` (PowerShell), or `set DIBS_ACTOR=agent-1` (cmd).
+- **Use `--json` output for parsing.** It is ASCII-escaped, so it is safe under any console code page. In PowerShell, parse it with `ConvertFrom-Json`; in bash, use `jq` or `python -c`.
+- **Human-readable output is UTF-8.** PowerShell (5.1 and 7) decodes native output with `[Console]::OutputEncoding`, often a legacy code page, so non-ASCII text such as emoji can look garbled. Run `[Console]::OutputEncoding = [Text.UTF8Encoding]::new()` once in the session to fix it.
+- **Paths.** Forward slashes work on every platform. Quote any path that contains spaces.
+- **Saving `report` output.** In PowerShell 5.1, `>` writes UTF-16. Set the console encoding above, then use `... | Out-File -Encoding utf8 report.md` instead.
+
 ## Coordination contract
 
 - Task `work_areas` do not create reservations by themselves. Supply `--reserve-file`, `--reserve-tree`, or `--resource` when claiming, or pass `--reserve-work-areas` to `claim`, `claim-next`, or `resume` to reserve the claimed task's work areas (existing directories become trees, everything else files; globs are rejected). Add reservations before touching more shared state.
@@ -36,7 +55,7 @@ Initialize once from the workspace root:
 python "<DIBS_SCRIPT>" init --workspace "." --actor "coordinator" --json
 ```
 
-The default journal is WAL. If initialization reports that the bundled SQLite lacks the required WAL fix, retry explicitly with `--journal delete`. Do not choose delete mode preemptively on a supported runtime.
+`init` picks the journal automatically: WAL when the runtime's SQLite has the WAL-reset fix, otherwise rollback (`delete`) mode. The result reports the chosen `journal`. Do not pass `--journal` unless the user asks for a specific mode.
 
 Import a UTF-8 JSON plan with this shape:
 
@@ -96,9 +115,13 @@ Resume `blocked` or `review` work with its current revision; this creates a fres
 
 Use `tag TASK --add TAG` or `--remove TAG` to change ephemeral board metadata without claiming the task or changing its revision. The change refreshes `updated` and records an audit event. Both flags are repeatable.
 
+## Reporting
+
+`report [TASK ...]` prints paste-ready Markdown per task: status, priority, type, tags, owner, work time, description, acceptance checklist (ticked when `done`), changed files across all handoffs, the latest checks, blockers, and next steps, plus a dated activity log of notes and handoff summaries. With no IDs it covers every task matching the `list` filters, e.g. `report --status done --updated-after 2026-09-21T00:00:00Z` for a weekly update. `--json` returns the task details plus the same text in `markdown`. When asked to write up, summarize, or document finished work for a ticket, story, PR, or status update, start from this output.
+
 ## Command routing
 
-- Inspect: `list`, `show`, `next`, `events`.
+- Inspect: `list`, `show`, `next`, `events`, `report`.
 - Acquire: `claim`, `claim-next`, `resume`, `reclaim`.
 - Maintain an owned task: `heartbeat`, `reserve`, `release`, `note`, `handoff`.
 - Release ownership: `block`, `review`, `complete`, `cancel`.

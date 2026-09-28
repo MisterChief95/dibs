@@ -1,0 +1,5 @@
+interface:
+  display_name: "Task report"
+  short_description: "Paste-ready Markdown for Dibs tasks."
+policy:
+  allow_implicit_invocation: false
