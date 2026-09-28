@@ -31,11 +31,11 @@ Dibs ships as a plugin/skill you install once per assistant, then use in any pro
 /plugin install dibs@dibs
 ```
 
-This installs the coordination skill (so Claude knows the claim/heartbeat/handoff contract in any project) and the four read-only `/dibs:list`, `/dibs:show`, `/dibs:next`, `/dibs:events` commands.
+This installs the coordination skill (so Claude knows the claim/heartbeat/handoff contract in any project) and the five read-only `/dibs:list`, `/dibs:show`, `/dibs:next`, `/dibs:events`, `/dibs:report` commands.
 
 **GitHub Copilot**
 
-Copilot has no cross-repo plugin installer — its instructions are per-repository. Copy [`scripts/`](scripts), [`skills/dibs/`](skills/dibs), [`.github/copilot-instructions.md`](.github/copilot-instructions.md), and [`.github/prompts/`](.github/prompts) into the target repo. VS Code Copilot Chat then exposes `/dibs-list`, `/dibs-show`, `/dibs-next`, and `/dibs-events`, and Copilot gets pointed at the coordination contract automatically.
+Copilot has no cross-repo plugin installer — its instructions are per-repository. Copy [`scripts/`](scripts), [`skills/dibs/`](skills/dibs), [`.github/copilot-instructions.md`](.github/copilot-instructions.md), and [`.github/prompts/`](.github/prompts) into the target repo. VS Code Copilot Chat then exposes `/dibs-list`, `/dibs-show`, `/dibs-next`, `/dibs-events`, and `/dibs-report`, and Copilot gets pointed at the coordination contract automatically.
 
 **Codex**
 
@@ -43,7 +43,7 @@ Copilot has no cross-repo plugin installer — its instructions are per-reposito
 codex plugin add MisterChief95/dibs
 ```
 
-Installs the coordination skill and explicit-only `/dibs:list`, `/dibs:show`, `/dibs:next`, and `/dibs:events` skills via [`.codex-plugin/plugin.json`](.codex-plugin/plugin.json).
+Installs the coordination skill and explicit-only `/dibs:list`, `/dibs:show`, `/dibs:next`, `/dibs:events`, and `/dibs:report` skills via [`.codex-plugin/plugin.json`](.codex-plugin/plugin.json).
 
 In every case, the actual logic is the one script, [`scripts/dibs.py`](scripts/dibs.py) — nothing to build, no server, no third-party dependencies.
 
@@ -94,11 +94,22 @@ currently active lease, capped at expiry):
 python scripts/dibs.py list --workspace . --fields id,status,created,updated,work-time,title
 ```
 
+## Reports for tickets and status updates
+
+`report` prints paste-ready Markdown for one or more tasks — description, acceptance checklist, work time, changed files, checks, blockers, next steps, and a dated activity log — ready to drop into a ticket, story, PR description, or standup note:
+
+```bash
+python scripts/dibs.py report TASK-001 --workspace .
+python scripts/dibs.py report --workspace . --status done --updated-after 2026-09-21T00:00:00Z > weekly.md
+```
+
+With no task IDs it covers every task matching the same filters as `list`. `--json` includes the text under `markdown`.
+
 Existing databases retain their timestamps and upgrade in place when `init` migrates them to schema version 3.
 
 ## For humans: checking status
 
-You don't need to read raw JSON or learn the CLI to see what's going on. Four read-only commands are available (see Installation above for how each assistant exposes them):
+You don't need to read raw JSON or learn the CLI to see what's going on. Five read-only commands are available (see Installation above for how each assistant exposes them):
 
 | Claude Code | Copilot Chat | Codex | Shows |
 |---|---|---|---|
@@ -106,6 +117,7 @@ You don't need to read raw JSON or learn the CLI to see what's going on. Four re
 | `/dibs:show <TASK-ID>` | `/dibs-show` | `/dibs:show` | One task's spec, owner/lease, dependencies, and handoff history |
 | `/dibs:next` | `/dibs-next` | `/dibs:next` | Tasks that are ready to claim right now |
 | `/dibs:events [TASK-ID]` | `/dibs-events` | `/dibs:events` | The audit log, optionally scoped to one task |
+| `/dibs:report [TASK-ID ...]` | `/dibs-report` | `/dibs:report` | Paste-ready Markdown for tickets, stories, and status updates |
 
 These only read the database — they can't claim, block, or complete work, so they're safe to run at any time without affecting running agents.
 
